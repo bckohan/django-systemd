@@ -181,7 +181,7 @@ skips = [
 [dependency-groups]
 dj42 = ["Django~=4.2; python_version < '3.13'"]
 dj52 = ["Django~=5.2"]
-dj60 = ["Django~=6.0; python_version >= '3.12'"]
+dj60 = ["Django~=5.2; python_version >= '3.12'"]
 typing = [
     "mypy>=1.15.0",
     "pyright>=1.1.396",
