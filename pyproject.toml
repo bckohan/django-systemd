@@ -219,7 +219,7 @@ docs = [
     "cmarkgfm==2024.11.20", # TODO: remove after https://github.com/theacodes/cmarkgfm/issues/83
 ]
 colorama = ["colorama>=0.4.6"]
-profiling = ["tuna>=0.5.11"]
+profiling = ["tuna>=0.5.13"]
 psycopg3 = ["psycopg>=3.1.8"]
 dev = [
     { include-group = "typing" },
