@@ -229,6 +229,6 @@ dev = [
     { include-group = "precommit" },
     "graphviz>=0.20.3",
     "ipdb>=0.13.13",
-    "tomlkit>=0.13.2",
+    "tomlkit>=0.14.0",
     "maturin>=1.9.4; sys_platform == 'win32'",
 ]
