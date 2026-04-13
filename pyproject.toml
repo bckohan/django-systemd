@@ -17,7 +17,7 @@ repository = "https://github.com/bckohan/django-systemd"
 homepage = "https://django-systemd.readthedocs.io"
 keywords = ["django", "CLI", "management", "Typer", "commands", "systemd", "services", "integration"]
 dependencies = [
-    "Django>=4.2,<6.1",
+    "Django>=5.2.13,<6.1",
     "django-render-static>=3.5.0",
     "django-typer>=3.5.1",
     "enum-properties>=2.4.1",
@@ -181,7 +181,7 @@ skips = [
 [dependency-groups]
 dj42 = ["Django~=4.2; python_version < '3.13'"]
 dj52 = ["Django~=5.2"]
-dj60 = ["Django~=6.0; python_version >= '3.12'"]
+dj60 = ["Django~=5.2; python_version >= '3.12'"]
 typing = [
     "mypy>=1.15.0",
     "pyright>=1.1.396",
