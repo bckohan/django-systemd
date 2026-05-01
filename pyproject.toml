@@ -19,7 +19,7 @@ keywords = ["django", "CLI", "management", "Typer", "commands", "systemd", "serv
 dependencies = [
     "Django>=4.2,<6.1",
     "django-render-static>=3.5.0",
-    "django-typer>=3.5.1",
+    "django-typer>=3.7.2",
     "enum-properties>=2.4.1",
 ]
 classifiers = [
@@ -64,7 +64,7 @@ systemd = [
     "python-systemd; sys_platform == 'linux'",
 ]
 rich = [
-    "rich>=10.11.0,<15.0.0",
+    "rich>=15.0.0,<16.0.0",
 ]
 
 [project.urls]

@@ -545,9 +545,9 @@ name = "django"
 version = "5.2.12"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
+    "python_full_version >= '3.12'",
     "python_full_version == '3.11.*'",
     "python_full_version < '3.11'",
-    "python_full_version >= '3.12'",
 ]
 dependencies = [
     { name = "asgiref", marker = "(python_full_version < '3.12' and extra != 'group-14-django-systemd-dj42') or extra == 'group-14-django-systemd-dj52' or (extra == 'group-14-django-systemd-dj42' and extra == 'group-14-django-systemd-dj60')" },
@@ -746,10 +746,10 @@ typing = [
 requires-dist = [
     { name = "django", specifier = ">=4.2,<6.1" },
     { name = "django-render-static", specifier = ">=3.5.0" },
-    { name = "django-typer", specifier = ">=3.5.1" },
+    { name = "django-typer", specifier = ">=3.7.2" },
     { name = "enum-properties", specifier = ">=2.4.1" },
     { name = "python-systemd", marker = "sys_platform == 'linux' and extra == 'systemd'" },
-    { name = "rich", marker = "extra == 'rich'", specifier = ">=10.11.0,<15.0.0" },
+    { name = "rich", marker = "extra == 'rich'", specifier = ">=15.0.0,<16.0.0" },
 ]
 provides-extras = ["systemd", "rich"]
 
@@ -830,7 +830,7 @@ typing = [
 
 [[package]]
 name = "django-typer"
-version = "3.6.4"
+version = "3.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -839,9 +839,9 @@ dependencies = [
     { name = "django", version = "6.0.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.12' and extra != 'group-14-django-systemd-dj42' and extra != 'group-14-django-systemd-dj52') or (extra == 'group-14-django-systemd-dj42' and extra == 'group-14-django-systemd-dj52') or (extra == 'group-14-django-systemd-dj42' and extra == 'group-14-django-systemd-dj60') or (extra == 'group-14-django-systemd-dj52' and extra == 'group-14-django-systemd-dj60')" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/5d/48e879127fdb45b292e383f9c3ce5c882ab2352274f151ef222f810e97d6/django_typer-3.6.4.tar.gz", hash = "sha256:cfe8c9a830a3bc31f92954c575a05f14743400e1789c88acd7e8fd5824decccc", size = 2973069, upload-time = "2026-03-02T23:39:21.802Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/8c/f99263dbdb200ddc5e44fc380c34aab0d5e02011c83c3be6de42322159bf/django_typer-3.7.2.tar.gz", hash = "sha256:93b404784ef3b4e413086afb6a8c5a4c0f7ba0e22968e7d2dd33326f0254774d", size = 2975511, upload-time = "2026-04-27T05:10:25.822Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4a/db/7db7e461d53d1a1222b9585a3728a17bb293a7f893fc29c13cd37d4104bc/django_typer-3.6.4-py3-none-any.whl", hash = "sha256:cc7b9cf2e2dcdfe279ed2d369b8aa33e5fee9c7c366cb8d9ab2968103003f06d", size = 296053, upload-time = "2026-03-02T23:39:20.264Z" },
+    { url = "https://files.pythonhosted.org/packages/83/17/b76bdee5184848cc9ef500edb57a0bdf75ad70a73d6791c5def6073b2a53/django_typer-3.7.2-py3-none-any.whl", hash = "sha256:2cde81d0f5aff5c04f44de18ef830ca7c7a452f4b9c70bdaeed977d45350dc56", size = 296772, upload-time = "2026-04-27T05:10:24.37Z" },
 ]
 
 [[package]]
@@ -1973,15 +1973,15 @@ wheels = [
 
 [[package]]
 name = "rich"
-version = "14.3.3"
+version = "15.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown-it-py" },
     { name = "pygments" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b3/c6/f3b320c27991c46f43ee9d856302c70dc2d0fb2dba4842ff739d5f46b393/rich-14.3.3.tar.gz", hash = "sha256:b8daa0b9e4eef54dd8cf7c86c03713f53241884e814f4e2f5fb342fe520f639b", size = 230582, upload-time = "2026-02-19T17:23:12.474Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz", hash = "sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36", size = 230680, upload-time = "2026-04-12T08:24:00.75Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/14/25/b208c5683343959b670dc001595f2f3737e051da617f66c31f7c4fa93abc/rich-14.3.3-py3-none-any.whl", hash = "sha256:793431c1f8619afa7d3b52b2cdec859562b950ea0d4b6b505397612db8d5362d", size = 310458, upload-time = "2026-02-19T17:23:13.732Z" },
+    { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
 ]
 
 [[package]]
