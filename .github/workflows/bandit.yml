@@ -33,7 +33,7 @@ jobs:
           python-version: '3.x'
           allow-prereleases: true
       - name: Install uv
-        uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
           enable-cache: false
       - name: Install Just
@@ -45,7 +45,7 @@ jobs:
 
       - name: Upload analysis results
         if: ${{ always() }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: bandit-results
           path: bandit.sarif
@@ -53,6 +53,6 @@ jobs:
 
       - name: Upload to code-scanning
         if: ${{ always() }}
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7
         with:
           sarif_file: bandit.sarif
