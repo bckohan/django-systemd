@@ -1,24 +1,35 @@
 name: OpenSSF Scorecard
 on:
+  # For Branch-Protection check. Only the default branch is supported. See
+  # https://github.com/ossf/scorecard/blob/main/docs/checks.md#branch-protection
   branch_protection_rule:
+  # To guarantee Maintained check is occasionally updated. See
+  # https://github.com/ossf/scorecard/blob/main/docs/checks.md#maintained
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
 
-permissions: read-all
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-latest
-    environment: scorecard
+    environment:
+      name: scorecard
+      deployment: false # Prevents creating a GitHub deployment object
     permissions:
-      security-events: write
-      id-token: write
+      security-events: write # allow uploading code scanning results
+      id-token: write # to allow OIDC authentication for publishing results to OpenSSF REST API
 
     steps:
       - name: "Checkout code"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
@@ -42,6 +53,8 @@ jobs:
           #     of the value entered here.
           publish_results: true
 
+      # Upload the results as artifacts (optional). Commenting out will disable uploads of run results in SARIF
+      # format to the repository Actions tab.
       - name: "Upload artifact"
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -49,7 +62,9 @@ jobs:
           path: results.sarif
           retention-days: 5
 
+      # Upload the results to GitHub's code scanning dashboard (optional).
+      # Commenting out will disable upload of results to your repo's Code Scanning dashboard
       - name: "Upload to code-scanning"
-        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7
+        uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a
         with:
           sarif_file: results.sarif

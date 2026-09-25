@@ -1,25 +1,29 @@
 name: Update Code of Conduct
 
-permissions: read-all
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   workflow_dispatch:
+  # Run every Sunday at midnight UTC (00:00) - triggered by webhook?
   schedule:
-    # Run every Sunday at midnight UTC
-    - cron: '0 0 * * SUN'
+    - cron: "0 0 * * SUN"
 
 jobs:
   update_code_of_conduct:
     permissions:
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: write # needed for CoC PR
+      pull-requests: write # needed for CoC PR
 
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
@@ -39,6 +43,7 @@ jobs:
             cp fetched_code_of_conduct.md CODE_OF_CONDUCT.md
           fi
 
+      # Create a pull request to merge the changes into the main branch
       - name: Create Pull Request
         if: steps.check_changes.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1
@@ -47,6 +52,6 @@ jobs:
           branch: bot-update-coc
           add-paths: |
             CODE_OF_CONDUCT.md
-          title: "Update Code of Conduct"
+          title: "🤖 Update Code of Conduct 🤖"
           body: "Update the Code of Conduct with the latest version from the django-commons repository."
           commit-message: "Update CODE_OF_CONDUCT.md from django-commons"

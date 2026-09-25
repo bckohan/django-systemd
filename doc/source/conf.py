@@ -7,6 +7,7 @@ import shutil
 import django
 from django.conf import settings
 
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 sys.path.append(str(Path(__file__).parent.parent.parent))
 sys.path.append(str(Path(__file__).parent / 'ext'))
 
@@ -75,7 +76,7 @@ exclude_patterns = []
 # html_theme = 'sphinx_rtd_theme'
 html_theme = 'furo'
 html_theme_options = {
-    "source_repository": "https://github.com/django-commons/django-typer/",
+    "source_repository": "https://github.com/bckohan/django-systemd/",
     "source_branch": "main",
     "source_directory": "doc/source",
 }
@@ -96,6 +97,8 @@ suppress_warnings = ['app.add_directive']
 linkcheck_ignore = [
     r'https://github.com/django/django/blob/main/django/core/management/__init__.py#L278',  # Ignore exact match
 ]
+
+linkcheck_allow_redirects = True
 
 autodoc_typehints = "description"  # or signature
 autodoc_typehints_format = "short"

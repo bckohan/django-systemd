@@ -1,0 +1,3 @@
+coverage:
+  fixes:
+    - "__init__.py::django_systemd/__init__.py"

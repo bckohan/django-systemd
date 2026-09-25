@@ -1,6 +1,6 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
-set unstable := true
-set script-interpreter := ['uv', 'run', '--script']
+set unstable
+set script-interpreter := ['uv', 'run', '--project', '.', '--script']
 
 export PYTHONPATH := source_directory()
 export DJANGO_SETTINGS_MODULE := "tests.settings"
@@ -13,10 +13,10 @@ default:
 [script]
 manage *COMMAND:
     import os
-    import sys
+    import shlex
     from django.core import management
-    os.environ["DJANGO_SETTINGS_MODULE"] = "tests.settings"
-    management.execute_from_command_line(sys.argv + "{{ COMMAND }}".split(" "))
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "tests.settings")
+    management.execute_from_command_line(["just manage", *shlex.split("{{ COMMAND }}")])
 
 # install the uv package manager
 [linux]
@@ -32,11 +32,11 @@ install-uv:
 # setup the venv and pre-commit hooks
 setup python="python":
     uv venv -p {{ python }}
-    @just install-precommit
+    @just install-prek
 
 # install git pre-commit hooks
-install-precommit:
-    @just run --no-default-groups --group precommit --exact --isolated pre-commit install
+install-prek:
+    uvx prek install
 
 # update and install development dependencies
 install *OPTS="--all-extras":
@@ -176,6 +176,10 @@ format *ENV:
     just --fmt --unstable
     @just run {{ ENV }} --no-default-groups --group lint ruff format
 
+# format the github workflow files
+format-workflows:
+    npx prettier --write ".github/workflows/*.{yml,yaml}"
+
 # sort imports and fix linting issues
 lint *ENV:
     @just sort-imports {{ ENV }}
@@ -193,7 +197,7 @@ bandit:
 # run zizmor security analysis of CI
 zizmor:
     cargo install --locked zizmor
-    zizmor --format sarif .github/workflows/ > zizmor.sarif
+    zizmor --persona auditor --format sarif .github/workflows/ > zizmor.sarif
 
 # run all static checks
 check *ENV:
@@ -225,8 +229,8 @@ debug-test *TESTS:
       --headed {{ TESTS }}
 
 # run the pre-commit checks
-precommit:
-    @just run pre-commit
+prek:
+    uvx prek run
 
 # erase any coverage data
 coverage-erase:
