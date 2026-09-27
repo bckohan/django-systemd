@@ -6,6 +6,7 @@ tests run on machines without systemd.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from unittest import mock
 
@@ -180,15 +181,26 @@ class TestSubprocessSystemdCtl:
             "web.service",
         ]
 
-    def test_install_unit_copies_with_mode(self, tmp_path):
+    def test_install_unit_copies(self, tmp_path):
         source = tmp_path / "web.service"
         source.write_text("[Unit]\nDescription=x\n")
         ctl = self._ctl(tmp_path)
         dest = ctl.install_unit(source)
         assert dest == ctl.unit_dir / "web.service"
         assert dest.read_text() == source.read_text()
-        assert dest.stat().st_mode & 0o777 == 0o644
         assert ctl.is_installed("web.service") is True
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows chmod only toggles the read-only flag",
+    )
+    def test_install_unit_sets_mode(self, tmp_path):
+        source = tmp_path / "web.service"
+        source.write_text("x")
+        ctl = self._ctl(tmp_path)
+        assert ctl.install_unit(source).stat().st_mode & 0o777 == 0o644
+        dest = ctl.install_unit(source, mode=0o640)
+        assert dest.stat().st_mode & 0o777 == 0o640
 
     def test_install_unit_custom_name_and_overwrite(self, tmp_path):
         source = tmp_path / "web.service"
