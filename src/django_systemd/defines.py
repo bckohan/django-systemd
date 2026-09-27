@@ -1,11 +1,55 @@
-from pathlib import Path
-from typing import t
+"""
+Enumerations of the values systemd accepts in unit files.
+"""
 
-from enum_properties import StrEnumProperties
+from dataclasses import dataclass
+from enum import Enum
+from typing import Self
 
 
-class SystemdUnitType(StrEnumProperties):
+@dataclass(eq=False, repr=False)
+class SystemdValue:
+    """The data every :class:`SystemdEnum` member carries."""
+
+    literal: str
+    """The string systemd uses for this value, e.g. ``service`` or ``on-failure``."""
+
     description: str
+    """A short human-readable explanation of the value."""
+
+
+class SystemdEnum(SystemdValue, Enum):
+    """
+    A dataclass enum whose ``value`` is the literal systemd string.
+
+    Members convert to and from that string: ``str(member)`` returns it and
+    ``SystemdUnitType("service")`` looks a member up by it. Members are not
+    ``str`` instances, so compare against other members or ``member.value``.
+    """
+
+    def __new__(cls, literal: str, description: str) -> Self:
+        member = object.__new__(cls)
+        member._value_ = literal
+        return member
+
+    def __str__(self) -> str:
+        return self.literal
+
+    @classmethod
+    def from_literal(cls, literal: str) -> Self:
+        """
+        Look a member up by its systemd string.
+
+        Equivalent to ``cls(literal)``, which mypy mis-checks against
+        :meth:`__new__`; use this in type-checked code.
+
+        :raises ValueError: if no member has this literal.
+        """
+        return cls(literal)  # type: ignore[call-arg]
+
+
+class SystemdUnitType(SystemdEnum):
+    """The kinds of systemd unit, named by their file suffix."""
 
     # fmt: off
     SERVICE   = "service",   "Manages system services and daemons, including their startup, shutdown, and runtime behavior."
@@ -23,8 +67,8 @@ class SystemdUnitType(StrEnumProperties):
     # fmt: on
 
 
-class SystemdStartupType(StrEnumProperties):
-    description: str
+class SystemdStartupType(SystemdEnum):
+    """Values of ``Type=`` in a ``[Service]`` section."""
 
     # fmt: off
     SIMPLE        = "simple", "systemd considers the service started immediately after the main process is forked."
@@ -38,8 +82,8 @@ class SystemdStartupType(StrEnumProperties):
     # fmt: on
 
 
-class SystemdRestartType(StrEnumProperties):
-    description: str
+class SystemdRestartType(SystemdEnum):
+    """Values of ``Restart=`` in a ``[Service]`` section."""
 
     # fmt: off
     NO           = "no",          "No automatic restarts."
@@ -49,14 +93,4 @@ class SystemdRestartType(StrEnumProperties):
     ON_WATCHDOG  = "on-watchdog", "Restarts only if the watchdog timeout is triggered."
     ON_ABORT     = "on-abort",    "Restarts on exit due to an uncaught signal not defined as clean."
     ALWAYS       = "always",      "Restarts regardless of exit status, signal termination, or timeout. "
-    # fmt: on
-
-
-class SystemdScope(StrEnumProperties):
-    location: t.List[Path]
-    description: str
-
-    # fmt: off
-    USER   = "user",   [Path("~/.config/systemd/user")], "Units are installed for the current user session."
-    SYSTEM = "system", [Path("/etc/systemd/system")], "Units are installed system-wide."
     # fmt: on

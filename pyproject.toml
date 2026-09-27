@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "django-systemd"
 version = "0.1.0"
 description = "Let your Django apps manage your systemd unit files and services!"
-requires-python = ">=3.10,<4.0"
+requires-python = ">=3.11,<4.0"
 authors = [
   {name = "Brian Kohan", email = "bckohan@gmail.com"},
 ]
@@ -20,7 +20,6 @@ dependencies = [
     "Django>=5.2,<6.2",
     "django-render-static>=3.5.0",
     "django-typer>=3.5.1",
-    "enum-properties>=2.4.1",
 ]
 classifiers = [
     "Environment :: Console",
@@ -35,7 +34,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -60,9 +58,6 @@ conflicts = [
 packages = ["src/django_systemd"]
 
 [project.optional-dependencies]
-systemd = [
-    "python-systemd; sys_platform == 'linux'",
-]
 rich = [
     "rich>=10.11.0,<16.0.0",
 ]
@@ -97,7 +92,7 @@ warn_unused_configs = true
 warn_unreachable = true
 warn_no_return = true
 mypy_path = "src"
-modules = "django_systemd"
+packages = ["django_systemd"]
 
 # todo doc8 configuration here is not being picked up and doesnt seem to be working
 # as expected - for now pass these parameters manually
@@ -147,7 +142,7 @@ source = [
 ]
 
 [tool.pyright]
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 exclude = ["tests/**/*"]
 include = [
     "src/django_systemd",
@@ -155,7 +150,7 @@ include = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py311"
 exclude = [
     "doc",
     "dist",
@@ -215,7 +210,7 @@ docs = [
     "sphinx-autobuild>=2024.10.3",
     "sphinx-tabs>=3.4.7",
     "sphinxcontrib-django>=2.5",
-    "sphinxcontrib-typer[png]>=0.5.1",
+    "sphinxcontrib-typer[png]>=0.10.0",
 ]
 colorama = ["colorama>=0.4.6"]
 profiling = ["tuna>=0.5.11"]
