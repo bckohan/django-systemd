@@ -170,6 +170,11 @@ class TestServiceUnit:
         with pytest.raises(ValueError):
             ServiceUnit.parse("notes.txt")
 
+    @pytest.mark.parametrize("name", ["-now.service", ".hidden.service", "@.service"])
+    def test_parse_rejects_leading_non_word_character(self, name):
+        with pytest.raises(ValueError):
+            ServiceUnit.parse(name)
+
     def test_parse_invalid_no_ext_raises(self):
         with pytest.raises(ValueError):
             ServiceUnit.parse("web")

@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+
+# Running systemctl is this module's purpose; see _systemctl for how it is called.
+import subprocess  # nosec B404
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -124,9 +127,16 @@ class SubprocessSystemdCtl:
     def available(self) -> bool:
         return shutil.which("systemctl") is not None
 
-    def _systemctl(self, *args: str, check: bool = True) -> CommandResult:
-        cmd = ["systemctl", "--user", *args]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    def _systemctl(
+        self, *args: str, units: Sequence[str] = (), check: bool = True
+    ) -> CommandResult:
+        # Unit names follow "--" so systemctl never parses one as an option.
+        cmd = ["systemctl", "--user", *args, *(("--", *units) if units else ())]
+        # An argument list with no shell, a fixed executable and fixed
+        # subcommands; unit names are positional after "--".
+        result = subprocess.run(  # nosec B603
+            cmd, capture_output=True, text=True, check=False
+        )
         if check and result.returncode != 0:
             raise subprocess.CalledProcessError(
                 result.returncode, cmd, result.stdout, result.stderr
@@ -142,28 +152,28 @@ class SubprocessSystemdCtl:
         self._systemctl("daemon-reload")
 
     def restart(self, *units: str) -> None:
-        self._systemctl("restart", *units)
+        self._systemctl("restart", units=units)
 
     def reload(self, *units: str) -> None:
-        self._systemctl("reload", *units)
+        self._systemctl("reload", units=units)
 
     def stop(self, unit: str) -> None:
-        self._systemctl("stop", unit)
+        self._systemctl("stop", units=[unit])
 
     def can_reload(self, unit: str) -> bool:
         result = self._systemctl(
-            "show", "--property=CanReload", "--value", unit, check=False
+            "show", "--property=CanReload", "--value", units=[unit], check=False
         )
         return result.stdout.strip() == "yes"
 
     def enable(self, unit: str) -> None:
-        self._systemctl("enable", unit)
+        self._systemctl("enable", units=[unit])
 
     def disable(self, unit: str) -> None:
-        self._systemctl("disable", unit)
+        self._systemctl("disable", units=[unit])
 
     def is_active(self, unit: str) -> bool:
-        result = self._systemctl("is-active", unit, check=False)
+        result = self._systemctl("is-active", units=[unit], check=False)
         if result.returncode != 0 and not result.stdout:
             raise subprocess.CalledProcessError(
                 result.returncode, result.argv, result.stdout, result.stderr
@@ -171,7 +181,7 @@ class SubprocessSystemdCtl:
         return result.stdout.strip() in self._ACTIVE_STATES
 
     def is_enabled(self, unit: str) -> bool:
-        result = self._systemctl("is-enabled", unit, check=False)
+        result = self._systemctl("is-enabled", units=[unit], check=False)
         if result.returncode != 0 and not result.stdout:
             raise subprocess.CalledProcessError(
                 result.returncode, result.argv, result.stdout, result.stderr
