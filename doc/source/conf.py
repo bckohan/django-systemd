@@ -55,6 +55,7 @@ extensions = [
     "sphinx.ext.viewcode",
     'sphinx.ext.intersphinx',
     "sphinx.ext.autosectionlabel",
+    "sphinxcontrib_enum",
 ]
 
 # Prepend the document name and a slash to the target header
