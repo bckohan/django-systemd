@@ -55,7 +55,10 @@ extensions = [
     "sphinx.ext.viewcode",
     'sphinx.ext.intersphinx',
     "sphinx.ext.autosectionlabel",
+    "sphinxcontrib_enum",
 ]
+
+enum_table_download = []
 
 # Prepend the document name and a slash to the target header
 autosectionlabel_prefix_document = True

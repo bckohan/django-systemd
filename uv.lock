@@ -678,6 +678,7 @@ dev = [
     { name = "sphinx-autobuild" },
     { name = "sphinx-tabs" },
     { name = "sphinxcontrib-django" },
+    { name = "sphinxcontrib-enum" },
     { name = "sphinxcontrib-typer", extra = ["png"] },
     { name = "tomlkit" },
 ]
@@ -696,6 +697,7 @@ docs = [
     { name = "sphinx-autobuild" },
     { name = "sphinx-tabs" },
     { name = "sphinxcontrib-django" },
+    { name = "sphinxcontrib-enum" },
     { name = "sphinxcontrib-typer", extra = ["png"] },
 ]
 lint = [
@@ -764,10 +766,11 @@ dev = [
     { name = "pywinpty", marker = "sys_platform == 'win32'", specifier = ">=3.0.0" },
     { name = "readme-renderer", extras = ["md"], specifier = ">=44.0" },
     { name = "ruff", specifier = ">=0.15.0" },
-    { name = "sphinx", specifier = ">=7.4.7" },
+    { name = "sphinx", specifier = ">=8.0" },
     { name = "sphinx-autobuild", specifier = ">=2024.10.3" },
     { name = "sphinx-tabs", specifier = ">=3.4.7" },
     { name = "sphinxcontrib-django", specifier = ">=2.5" },
+    { name = "sphinxcontrib-enum", specifier = ">=0.1.0" },
     { name = "sphinxcontrib-typer", extras = ["png"], specifier = ">=0.10.0" },
     { name = "tomlkit", specifier = ">=0.13.3" },
 ]
@@ -777,10 +780,11 @@ docs = [
     { name = "doc8", specifier = ">=1.1.2" },
     { name = "furo", specifier = ">=2024.8.6" },
     { name = "readme-renderer", extras = ["md"], specifier = ">=44.0" },
-    { name = "sphinx", specifier = ">=7.4.7" },
+    { name = "sphinx", specifier = ">=8.0" },
     { name = "sphinx-autobuild", specifier = ">=2024.10.3" },
     { name = "sphinx-tabs", specifier = ">=3.4.7" },
     { name = "sphinxcontrib-django", specifier = ">=2.5" },
+    { name = "sphinxcontrib-enum", specifier = ">=0.1.0" },
     { name = "sphinxcontrib-typer", extras = ["png"], specifier = ">=0.10.0" },
 ]
 lint = [
@@ -2157,6 +2161,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/dc/28/92f6d685899fbd74a6c575c50dcc1abb8ab69c6da0160bc99d557d2104d1/sphinxcontrib-django-2.5.tar.gz", hash = "sha256:45a54c0cc1f641d6c15872828862f0738348ca8d7d5b92777bcaa530678c2cc4", size = 23788, upload-time = "2023-09-26T17:54:36.259Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/45/3c/2de4b64abb71cf0f27f9e4401695d8843efed9fdd89ab49957f157a23519/sphinxcontrib_django-2.5-py3-none-any.whl", hash = "sha256:70148af4ccbb5184c5b1add939c3827c79a29a7d20ed18c25ceab347e3f14ca8", size = 21538, upload-time = "2023-09-26T17:54:34.404Z" },
+]
+
+[[package]]
+name = "sphinxcontrib-enum"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-14-django-systemd-dj52' and extra == 'group-14-django-systemd-dj61')" },
+    { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-14-django-systemd-dj52' and extra == 'group-14-django-systemd-dj61')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e4/a5/434621fa56d6b4593bc1118cf1d8358c5e8c3c351c40fa3bb8e35d06f2e4/sphinxcontrib_enum-0.1.0.tar.gz", hash = "sha256:d096c447e30fb5f60678b58bec85db9af9e296b26703e124fd9fd122c0a4aa3e", size = 146352, upload-time = "2026-09-28T05:34:37.383Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/05/c56524985f8393e9006ef7a058005c61320a81a19669f88582cf2edcbce9/sphinxcontrib_enum-0.1.0-py3-none-any.whl", hash = "sha256:6e43bf8cded602ba0011f8a9115471d5c9a14fc01e5cde93935453a5720b3ed8", size = 13917, upload-time = "2026-09-28T05:34:36.026Z" },
 ]
 
 [[package]]
