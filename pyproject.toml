@@ -121,7 +121,7 @@ addopts = [
 ]
 
 markers = [
-    "render: template discovery and rendering; the only tests run on Windows",
+    "render: template discovery and rendering; the only tests CI runs on Windows and macOS",
 ]
 
 # upstream typer has deprecated shell_completion in favor of autocomplete, but
