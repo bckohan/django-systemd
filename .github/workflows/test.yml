@@ -144,6 +144,8 @@ jobs:
             django-version: "dj61"
     env:
       COVERAGE_FILE: windows-py${{ matrix.python-version }}-${{ matrix.django-version }}-sqlite.coverage
+      # systemd only exists on Linux; on Windows only rendering is supported.
+      PYTEST_ADDOPTS: "-m render"
       TEST_PYTHON_VERSION: ${{ matrix.python-version }}
       TEST_DJANGO_VERSION: ${{ matrix.django-version }}
       TEST_DATABASE_VERSION: "sqlite"
@@ -211,6 +213,8 @@ jobs:
             django-version: "dj61"
     env:
       COVERAGE_FILE: macos-py${{ matrix.python-version }}-${{ matrix.django-version }}-sqlite.coverage
+      # systemd only exists on Linux; on macOS only rendering is supported.
+      PYTEST_ADDOPTS: "-m render"
       TEST_PYTHON_VERSION: ${{ matrix.python-version }}
       TEST_DJANGO_VERSION: ${{ matrix.django-version }}
       TEST_DATABASE_VERSION: "sqlite"

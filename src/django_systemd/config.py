@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 unit_types = "|".join(re.escape(typ.value) for typ in SystemdUnitType)
 
-SERVICE_UNIT_REGEX = re.compile(rf"^(?P<name>[\w.@-]+)\.(?P<type>{unit_types})$")
+# Names start with a word character so none can be mistaken for an option.
+SERVICE_UNIT_REGEX = re.compile(rf"^(?P<name>\w[\w.@-]*)\.(?P<type>{unit_types})$")
 
 # A deterministic sort key for the order units are invoked and reported in.
 # Sockets sort before the services they activate, paths and timers sort after.

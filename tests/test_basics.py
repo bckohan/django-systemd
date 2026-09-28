@@ -29,6 +29,10 @@ from django_systemd.defines import (
 # ---------------------------------------------------------------------------
 
 
+# Everything here is platform independent, so it also runs on Windows.
+pytestmark = pytest.mark.render
+
+
 class TestSystemdUnitType:
     def test_all_values(self):
         values = {u.value for u in SystemdUnitType}
@@ -169,6 +173,11 @@ class TestServiceUnit:
     def test_parse_invalid_raises(self):
         with pytest.raises(ValueError):
             ServiceUnit.parse("notes.txt")
+
+    @pytest.mark.parametrize("name", ["-now.service", ".hidden.service", "@.service"])
+    def test_parse_rejects_leading_non_word_character(self, name):
+        with pytest.raises(ValueError):
+            ServiceUnit.parse(name)
 
     def test_parse_invalid_no_ext_raises(self):
         with pytest.raises(ValueError):

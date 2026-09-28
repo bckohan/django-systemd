@@ -16,7 +16,8 @@ runs as root.
 
 from __future__ import annotations
 
-import subprocess
+# Only for subprocess.CalledProcessError; commands run in protocol.py.
+import subprocess  # nosec B404
 import tempfile
 from collections.abc import Callable
 from functools import cached_property

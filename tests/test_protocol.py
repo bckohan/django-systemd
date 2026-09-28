@@ -98,7 +98,13 @@ class TestSubprocessSystemdCtl:
     def test_unit_verbs(self, run, method, verb, args, expected_units, tmp_path):
         run.return_value = completed()
         getattr(self._ctl(tmp_path), method)(*args)
-        assert run.call_args[0][0] == ["systemctl", "--user", verb, *expected_units]
+        assert run.call_args[0][0] == [
+            "systemctl",
+            "--user",
+            verb,
+            "--",
+            *expected_units,
+        ]
 
     @pytest.mark.parametrize(
         "stdout,expected",
@@ -117,8 +123,16 @@ class TestSubprocessSystemdCtl:
             "systemctl",
             "--user",
             "is-active",
+            "--",
             "web.service",
         ]
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_unit_names_are_never_parsed_as_options(self, run, tmp_path):
+        run.return_value = completed()
+        self._ctl(tmp_path).restart("--now.service")
+        argv = run.call_args[0][0]
+        assert argv.index("--") < argv.index("--now.service")
 
     @mock.patch("django_systemd.protocol.subprocess.run")
     def test_is_active_unreachable_bus_raises(self, run, tmp_path):
@@ -162,18 +176,26 @@ class TestSubprocessSystemdCtl:
             "show",
             "--property=CanReload",
             "--value",
+            "--",
             "web.service",
         ]
 
-    def test_install_unit_copies_with_mode(self, tmp_path):
+    def test_install_unit_copies(self, tmp_path):
         source = tmp_path / "web.service"
         source.write_text("[Unit]\nDescription=x\n")
         ctl = self._ctl(tmp_path)
         dest = ctl.install_unit(source)
         assert dest == ctl.unit_dir / "web.service"
         assert dest.read_text() == source.read_text()
-        assert dest.stat().st_mode & 0o777 == 0o644
         assert ctl.is_installed("web.service") is True
+
+    def test_install_unit_sets_mode(self, tmp_path):
+        source = tmp_path / "web.service"
+        source.write_text("x")
+        ctl = self._ctl(tmp_path)
+        assert ctl.install_unit(source).stat().st_mode & 0o777 == 0o644
+        dest = ctl.install_unit(source, mode=0o640)
+        assert dest.stat().st_mode & 0o777 == 0o640
 
     def test_install_unit_custom_name_and_overwrite(self, tmp_path):
         source = tmp_path / "web.service"

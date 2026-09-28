@@ -210,6 +210,7 @@ class TestList:
         assert row.split()[1:4] == ["yes", "-", "-"]
 
 
+@pytest.mark.render
 @pytest.mark.django_db
 class TestRender:
     def test_creates_files(self, fake_ctl, tmp_path, capsys):
@@ -509,6 +510,7 @@ class TestUninstall:
         assert "systemctl not found" in capsys.readouterr().err
 
 
+@pytest.mark.render
 class TestParseContext:
     def test_value_contains_equals(self):
         assert parse_context(["KEY=a=b"]) == {"KEY": "a=b"}
