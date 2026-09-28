@@ -29,6 +29,10 @@ from django_systemd.defines import (
 # ---------------------------------------------------------------------------
 
 
+# Everything here is platform independent, so it also runs on Windows.
+pytestmark = pytest.mark.render
+
+
 class TestSystemdUnitType:
     def test_all_values(self):
         values = {u.value for u in SystemdUnitType}

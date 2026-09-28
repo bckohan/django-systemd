@@ -69,6 +69,8 @@ just release 1.2.3   # validates version, tags, and pushes tag to GitHub
 
 Tests use `pytest` with `pytest-django`. Test settings are in `tests/settings.py` (`DJANGO_SETTINGS_MODULE=tests.settings`). Test apps in `tests/apps/app1/` and `tests/apps/app2/` contain example systemd unit templates for testing template precedence and rendering.
 
+Tests marked `render` (template discovery and rendering) are the only ones CI runs on Windows, since systemd only exists on Linux; mark any new platform-independent rendering test with `@pytest.mark.render`. Run just those with `PYTEST_ADDOPTS="-m render" just test`.
+
 Django versions are selected at test-run time via mutually exclusive `uv` dependency groups: `dj52`, `dj61`. CI passes these as `--group` flags to `just test-all`, and also runs the lowest supported direct dependency versions on the oldest supported Python with `--resolution lowest-direct`.
 
 ## Architecture
