@@ -4,8 +4,8 @@
 Change Log
 ==========
 
-Unreleased
-==========
+v0.2.0 (2026-09-29)
+===================
 
 * System scope is now the default: units are managed with the system manager,
   installed under ``/etc/systemd/system``, and run as the ``User=`` they name.
