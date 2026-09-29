@@ -180,8 +180,10 @@ class SubprocessSystemdCtl:
 
     def _run(self, cmd: list[str], *, check: bool = True) -> CommandResult:
         """Run ``cmd`` (an argument list, never a shell) and wrap the result."""
-        # An argument list with no shell, a fixed executable and fixed
-        # subcommands; unit names are positional after "--".
+        # An argument list with no shell. The optional leading prefix is operator
+        # configuration from settings (SYSTEMD_ESCALATE), never user input; the
+        # executable that follows it is always one of "systemctl", "install" or
+        # "rm", and unit names are confined to bare file names after "--".
         result = subprocess.run(  # nosec B603
             cmd, capture_output=True, text=True, check=False
         )
@@ -277,7 +279,9 @@ class SubprocessSystemdCtl:
         destination = self._unit_path(name if name is not None else source.name)
         if self.escalates:
             # install(1) creates or replaces the file with the mode in one step and
-            # is easy to allow in a sudoers rule.
+            # is easy to allow in a sudoers rule. Unlike the Python path below,
+            # this replace is not atomic; only a concurrent daemon-reload could
+            # observe the file mid-write.
             self._privileged(
                 ["install", "-m", f"{mode:o}", "--", str(source), str(destination)]
             )
@@ -295,6 +299,8 @@ class SubprocessSystemdCtl:
 
     def uninstall_unit(self, name: str) -> bool:
         destination = self._unit_path(name)
+        # The existence check only needs read/search access to the unit directory;
+        # rm -f tolerates a file that vanished in between, so the race is benign.
         if not (destination.is_file() or destination.is_symlink()):
             return False
         if self.escalates:

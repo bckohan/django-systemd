@@ -387,6 +387,16 @@ class TestEscalationSetting:
         with override_settings(SYSTEMD_ESCALATE=""):
             assert escalation() == ()
 
+    def test_non_string_non_sequence_raises(self):
+        with override_settings(SYSTEMD_ESCALATE=True):
+            with pytest.raises(ImproperlyConfigured):
+                escalation()
+
+    def test_unparseable_string_raises(self):
+        with override_settings(SYSTEMD_ESCALATE="sudo 'x"):
+            with pytest.raises(ImproperlyConfigured):
+                escalation()
+
 
 @pytest.mark.django_db
 class TestRenderEngine:

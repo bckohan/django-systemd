@@ -1,6 +1,6 @@
 """
-Tests for the user-scope systemctl seam. subprocess.run is always mocked, so these
-tests run on machines without systemd.
+Tests for the systemctl seam in both scopes. subprocess.run is always mocked, so
+these tests run on machines without systemd.
 """
 
 from __future__ import annotations
@@ -194,13 +194,15 @@ class TestEscalation:
         assert run.call_count == 1
 
     @mock.patch("django_systemd.protocol.os.geteuid", return_value=0)
-    def test_root_uses_python_file_operations(self, _euid, tmp_path):
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_root_uses_python_file_operations(self, run, _euid, tmp_path):
         source = tmp_path / "a.service"
         source.write_text("x")
         ctl = self._ctl(tmp_path)
         dest = ctl.install_unit(source)
         assert dest.read_text() == "x"
         assert ctl.uninstall_unit("a.service") is True
+        run.assert_not_called()
 
 
 class TestSubprocessSystemdCtl:

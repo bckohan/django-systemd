@@ -117,15 +117,31 @@ def escalation() -> tuple[str, ...]:
     Either a command string such as ``"sudo -n"`` (split with :mod:`shlex`) or a
     sequence of arguments. Empty or ``None`` means no escalation. It is only
     applied to privileged calls in the system scope, and never when already root.
+
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is
+        neither a string nor a sequence of arguments, or a string :mod:`shlex`
+        cannot parse.
     """
     from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
 
     value = getattr(settings, "SYSTEMD_ESCALATE", None)
     if not value:
         return ()
     if isinstance(value, str):
-        return tuple(shlex.split(value))
-    return tuple(str(part) for part in value)
+        try:
+            return tuple(shlex.split(value))
+        except ValueError as err:
+            raise ImproperlyConfigured(
+                "SYSTEMD_ESCALATE must be a command string such as "
+                f'"sudo -n" or a sequence of arguments, got {value!r}.'
+            ) from err
+    if hasattr(value, "__iter__"):
+        return tuple(str(part) for part in value)
+    raise ImproperlyConfigured(
+        "SYSTEMD_ESCALATE must be a command string such as "
+        f'"sudo -n" or a sequence of arguments, got {value!r}.'
+    )
 
 
 @cache
