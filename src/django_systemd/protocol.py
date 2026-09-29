@@ -12,6 +12,9 @@ In the user scope, talking to the manager from a non-login session (for example
 over SSH as a deploy user) requires lingering to be enabled for that user with
 ``loginctl enable-linger``, or ``XDG_RUNTIME_DIR`` to be set. Failures show up as
 ``Failed to connect to bus`` in the raised CalledProcessError.
+
+The escalation seam (:attr:`SubprocessSystemdCtl.escalates`) uses ``os.geteuid``
+and is therefore POSIX-only.
 """
 
 from __future__ import annotations
@@ -105,6 +108,9 @@ class SystemdCtl(Protocol):
         :param name: Install under this file name instead of ``source.name``.
         :param mode: File mode to apply to the installed unit.
         :return: The path of the installed unit file.
+        :raises subprocess.CalledProcessError: if escalated and the escalated
+            command fails.
+        :raises OSError: if not escalated and the file operation fails.
         """
         ...
 
@@ -113,6 +119,9 @@ class SystemdCtl(Protocol):
         Remove the unit file with this name from :attr:`unit_dir`.
 
         :return: True if a file was removed, False if there was nothing to remove.
+        :raises subprocess.CalledProcessError: if escalated and the escalated
+            command fails.
+        :raises OSError: if not escalated and the file operation fails.
         """
         ...
 
@@ -128,6 +137,9 @@ class SubprocessSystemdCtl:
     :param unit_dir: Where to install unit files. Defaults to
         :func:`system_unit_dir` in the system scope and :func:`user_unit_dir` in
         the user scope.
+    :param escalate: A privilege escalation prefix, e.g. ``("sudo", "-n")``. Only
+        applied to privileged calls in the system scope, and never when already
+        root. Read-only queries are never escalated.
     """
 
     # systemctl is-enabled prints one of many states; these all mean "will start".
@@ -142,8 +154,10 @@ class SubprocessSystemdCtl:
         scope: SystemdScope = SystemdScope.SYSTEM,
         *,
         unit_dir: Path | None = None,
+        escalate: Sequence[str] = (),
     ) -> None:
         self.scope = scope
+        self.escalate = tuple(escalate)
         self.unit_dir = unit_dir or (
             system_unit_dir() if scope is SystemdScope.SYSTEM else user_unit_dir()
         )
@@ -152,18 +166,20 @@ class SubprocessSystemdCtl:
     def available(self) -> bool:
         return shutil.which("systemctl") is not None
 
-    def _systemctl(
-        self, *args: str, units: Sequence[str] = (), check: bool = True
-    ) -> CommandResult:
-        # --no-ask-password: fail rather than prompt when authorization is missing.
-        # Unit names follow "--" so systemctl never parses one as an option.
-        cmd = [
-            "systemctl",
-            *(["--user"] if self.scope is SystemdScope.USER else []),
-            "--no-ask-password",
-            *args,
-            *(("--", *units) if units else ()),
-        ]
+    @property
+    def escalates(self) -> bool:
+        """
+        True if privileged calls are prefixed: a prefix is configured, the scope
+        is the system one, and the effective user is not root.
+        """
+        return (
+            bool(self.escalate)
+            and self.scope is SystemdScope.SYSTEM
+            and os.geteuid() != 0
+        )
+
+    def _run(self, cmd: list[str], *, check: bool = True) -> CommandResult:
+        """Run ``cmd`` (an argument list, never a shell) and wrap the result."""
         # An argument list with no shell, a fixed executable and fixed
         # subcommands; unit names are positional after "--".
         result = subprocess.run(  # nosec B603
@@ -180,6 +196,33 @@ class SubprocessSystemdCtl:
             stderr=result.stderr,
         )
 
+    def _privileged(self, cmd: list[str], *, check: bool = True) -> CommandResult:
+        """Run ``cmd`` under the escalation prefix when :attr:`escalates`."""
+        return self._run([*self.escalate, *cmd] if self.escalates else cmd, check=check)
+
+    def _systemctl_argv(self, *args: str, units: Sequence[str] = ()) -> list[str]:
+        # --no-ask-password: fail rather than prompt when authorization is missing.
+        # Unit names follow "--" so systemctl never parses one as an option.
+        return [
+            "systemctl",
+            *(["--user"] if self.scope is SystemdScope.USER else []),
+            "--no-ask-password",
+            *args,
+            *(("--", *units) if units else ()),
+        ]
+
+    def _systemctl(
+        self, *args: str, units: Sequence[str] = (), check: bool = True
+    ) -> CommandResult:
+        """A privileged systemctl call: changes manager state, so may be escalated."""
+        return self._privileged(self._systemctl_argv(*args, units=units), check=check)
+
+    def _query(
+        self, *args: str, units: Sequence[str] = (), check: bool = False
+    ) -> CommandResult:
+        """A read-only systemctl call. Never escalated."""
+        return self._run(self._systemctl_argv(*args, units=units), check=check)
+
     def daemon_reload(self) -> None:
         self._systemctl("daemon-reload")
 
@@ -193,7 +236,7 @@ class SubprocessSystemdCtl:
         self._systemctl("stop", units=[unit])
 
     def can_reload(self, unit: str) -> bool:
-        result = self._systemctl(
+        result = self._query(
             "show", "--property=CanReload", "--value", units=[unit], check=False
         )
         return result.stdout.strip() == "yes"
@@ -205,7 +248,7 @@ class SubprocessSystemdCtl:
         self._systemctl("disable", units=[unit])
 
     def is_active(self, unit: str) -> bool:
-        result = self._systemctl("is-active", units=[unit], check=False)
+        result = self._query("is-active", units=[unit], check=False)
         if result.returncode != 0 and not result.stdout:
             raise subprocess.CalledProcessError(
                 result.returncode, result.argv, result.stdout, result.stderr
@@ -213,7 +256,7 @@ class SubprocessSystemdCtl:
         return result.stdout.strip() in self._ACTIVE_STATES
 
     def is_enabled(self, unit: str) -> bool:
-        result = self._systemctl("is-enabled", units=[unit], check=False)
+        result = self._query("is-enabled", units=[unit], check=False)
         if result.returncode != 0 and not result.stdout:
             raise subprocess.CalledProcessError(
                 result.returncode, result.argv, result.stdout, result.stderr
@@ -232,6 +275,13 @@ class SubprocessSystemdCtl:
         self, source: Path, *, name: str | None = None, mode: int = 0o644
     ) -> Path:
         destination = self._unit_path(name if name is not None else source.name)
+        if self.escalates:
+            # install(1) creates or replaces the file with the mode in one step and
+            # is easy to allow in a sudoers rule.
+            self._privileged(
+                ["install", "-m", f"{mode:o}", "--", str(source), str(destination)]
+            )
+            return destination
         self.unit_dir.mkdir(parents=True, exist_ok=True)
         staged = destination.with_name(destination.name + ".tmp")
         try:
@@ -245,7 +295,10 @@ class SubprocessSystemdCtl:
 
     def uninstall_unit(self, name: str) -> bool:
         destination = self._unit_path(name)
-        if destination.is_file() or destination.is_symlink():
+        if not (destination.is_file() or destination.is_symlink()):
+            return False
+        if self.escalates:
+            self._privileged(["rm", "-f", "--", str(destination)])
+        else:
             destination.unlink()
-            return True
-        return False
+        return True

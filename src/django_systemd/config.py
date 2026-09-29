@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shlex
 import sys
 import typing as t
 from dataclasses import dataclass
@@ -107,6 +108,24 @@ def scope() -> SystemdScope:
             f"SYSTEMD_SCOPE must be one of "
             f"{', '.join(s.value for s in SystemdScope)}, got {value!r}."
         ) from err
+
+
+def escalation() -> tuple[str, ...]:
+    """
+    The privilege escalation prefix from the ``SYSTEMD_ESCALATE`` setting.
+
+    Either a command string such as ``"sudo -n"`` (split with :mod:`shlex`) or a
+    sequence of arguments. Empty or ``None`` means no escalation. It is only
+    applied to privileged calls in the system scope, and never when already root.
+    """
+    from django.conf import settings
+
+    value = getattr(settings, "SYSTEMD_ESCALATE", None)
+    if not value:
+        return ()
+    if isinstance(value, str):
+        return tuple(shlex.split(value))
+    return tuple(str(part) for part in value)
 
 
 @cache

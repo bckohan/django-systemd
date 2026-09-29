@@ -6,6 +6,7 @@ FakeCtl, so nothing here needs systemd installed.
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
@@ -31,10 +32,12 @@ class FakeCtl:
         available: bool = True,
         reloadable: set[str] | None = None,
         scope: SystemdScope = SystemdScope.SYSTEM,
+        escalate: Sequence[str] = (),
     ) -> None:
         self.unit_dir = unit_dir
         self.available = available
         self.scope = scope
+        self.escalate = tuple(escalate)
         self.reloadable = reloadable or set()
         self.calls: list[tuple[str, str]] = []
         self.active: set[str] = set()

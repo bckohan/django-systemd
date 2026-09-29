@@ -14,6 +14,7 @@ from django.test import override_settings
 from django_systemd.config import (
     SERVICE_UNIT_REGEX,
     ServiceUnit,
+    escalation,
     project_units,
     render_engine,
     scope,
@@ -365,6 +366,26 @@ class TestScopeSetting:
             and "SYSTEMD_TEMPLATE_CONTEXT" in rec.message
             for rec in caplog.records
         )
+
+
+@pytest.mark.django_db
+class TestEscalationSetting:
+    def test_default_is_empty(self):
+        assert escalation() == ()
+
+    def test_string_is_split(self):
+        with override_settings(SYSTEMD_ESCALATE="sudo -n"):
+            assert escalation() == ("sudo", "-n")
+
+    def test_sequence_passes_through(self):
+        with override_settings(SYSTEMD_ESCALATE=["doas"]):
+            assert escalation() == ("doas",)
+
+    def test_none_and_empty_mean_no_escalation(self):
+        with override_settings(SYSTEMD_ESCALATE=None):
+            assert escalation() == ()
+        with override_settings(SYSTEMD_ESCALATE=""):
+            assert escalation() == ()
 
 
 @pytest.mark.django_db
