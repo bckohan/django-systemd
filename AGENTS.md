@@ -76,7 +76,7 @@ Django versions are selected at test-run time via mutually exclusive `uv` depend
 ## Architecture
 
 **Core components**:
-- `defines.py`: Dataclass enums (`SystemdEnum`) for systemd unit types (`SystemdUnitType`), startup types and restart types; each member's `value` is the literal systemd string and it carries a `description`
+- `defines.py`: `StrEnum` enumerations for systemd unit types (`SystemdUnitType`), startup types and restart types; each member's value is the literal systemd string and its docstring describes it. `sphinxcontrib-enum` renders them as tables in the docs, so keep the member docstrings.
 - `config.py`: Template engine configuration using `django-render-static` to discover and render systemd unit templates from app `systemd/` directories
 - `management/commands/systemd.py`: Django management command built with `django-typer`
 
