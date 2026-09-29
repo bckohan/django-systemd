@@ -503,3 +503,8 @@ class TestInstallMethodSettings:
         with override_settings(SYSTEMD_INSTALL_METHOD="symlink"):
             with pytest.raises(ImproperlyConfigured):
                 install_method()
+
+    def test_relative_link_dir_raises(self):
+        with override_settings(SYSTEMD_LINK_DIR="relative/units"):
+            with pytest.raises(ImproperlyConfigured):
+                link_dir()

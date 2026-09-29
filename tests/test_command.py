@@ -108,25 +108,43 @@ class FakeCtl:
 
     def uninstall_unit(self, name: str) -> bool:
         destination = self.unit_dir / name
-        if destination.is_file():
+        if destination.is_file() or destination.is_symlink():
             self.calls.append(("uninstall", name))
             destination.unlink()
             return True
         return False
 
     def link_unit(self, source: Path) -> Path:
-        self.calls.append(("link", source.name))
+        self._maybe_fail("link", source.name)
         self.unit_dir.mkdir(parents=True, exist_ok=True)
         destination = self.unit_dir / source.name
-        if destination.is_symlink() or destination.is_file():
+        if destination.exists() and not destination.is_symlink():
+            # Mirrors "systemctl link --force": a symlink is replaced, but a
+            # regular file at the destination is rejected.
+            raise subprocess.CalledProcessError(
+                1,
+                [
+                    "systemctl",
+                    "--no-ask-password",
+                    "link",
+                    "--force",
+                    "--",
+                    str(source),
+                ],
+                "",
+                f"Failed to link unit: File exists: {destination}",
+            )
+        if destination.is_symlink():
             destination.unlink()
         destination.symlink_to(source.absolute())
+        self.calls.append(("link", source.name))
         return destination
 
     def linked_source(self, name: str) -> Path | None:
         destination = self.unit_dir / name
         if destination.is_symlink():
-            return Path(os.readlink(destination))
+            target = Path(os.readlink(destination))
+            return target if target.is_absolute() else destination.parent / target
         return None
 
 

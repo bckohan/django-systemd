@@ -173,11 +173,21 @@ def link_dir() -> Path | None:
     install method is :attr:`~django_systemd.defines.InstallMethod.LINK`.
 
     :return: A :class:`~pathlib.Path`, or ``None`` when unset.
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is a
+        relative path.
     """
     from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
 
     value = getattr(settings, "SYSTEMD_LINK_DIR", None)
-    return Path(value) if value else None
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        raise ImproperlyConfigured(
+            f"SYSTEMD_LINK_DIR must be an absolute path, got {value!r}."
+        )
+    return path
 
 
 @cache

@@ -471,6 +471,18 @@ class TestLink:
         )
         assert run.call_args[0][0][:2] == ["sudo", "-n"]
 
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_unit_failure_raises(self, run, tmp_path):
+        run.return_value = completed(1, "", "Failed to link unit: File exists")
+        source = tmp_path / "a.service"
+        source.write_text("x")
+        ctl = SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "unitdir"
+        )
+        with pytest.raises(subprocess.CalledProcessError) as exc:
+            ctl.link_unit(source)
+        assert "File exists" in exc.value.stderr
+
     def test_linked_source(self, tmp_path):
         ctl = SubprocessSystemdCtl(
             scope=SystemdScope.USER, unit_dir=tmp_path / "unitdir"
@@ -480,7 +492,13 @@ class TestLink:
         target.write_text("x")
         (ctl.unit_dir / "a.service").symlink_to(target)
         (ctl.unit_dir / "b.service").write_text("y")
+        (tmp_path / "c.service").write_text("z")
+        (ctl.unit_dir / "c.service").symlink_to("../c.service")
         assert ctl.linked_source("a.service") == target
         assert ctl.linked_source("b.service") is None
         assert ctl.linked_source("missing.service") is None
+        assert (
+            ctl.linked_source("c.service").resolve()
+            == (ctl.unit_dir / ".." / "c.service").resolve()
+        )
         assert ctl.is_installed("a.service") is True

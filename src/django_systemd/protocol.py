@@ -76,8 +76,9 @@ class SystemdCtl(Protocol):
         True if a systemctl binary is on PATH. This does not check that the
         manager is reachable; callers must check it before calling any other
         systemctl-backed method, which raise FileNotFoundError when systemctl is
-        absent. ``is_installed``, ``install_unit`` and ``uninstall_unit`` are
-        filesystem-only and do not require this check.
+        absent. ``is_installed``, ``install_unit``, ``uninstall_unit`` and
+        ``linked_source`` are filesystem-only and do not require this check;
+        ``link_unit`` calls ``systemctl`` and does.
         """
         ...
 
@@ -134,7 +135,20 @@ class SystemdCtl(Protocol):
         writes to the unit directory itself. Re-linking an already linked unit
         is fine.
 
+        ``source`` must be absolute (a relative path is resolved against the
+        current working directory, which is rarely what the caller intends),
+        outside systemd's unit search path (linking a file that is already a
+        search path member is rejected by systemd), and on a file system that
+        is mounted at boot: systemd reads it as root during early boot, so a
+        separately mounted ``/home`` is not suitable. With a custom
+        :attr:`unit_dir` the returned path is only where the real scope's
+        manager would resolve the link if ``unit_dir`` happens to match that
+        scope's actual unit directory; systemd itself always places the link
+        according to its own scope, not the caller's ``unit_dir``.
+
         :return: The path of the symlink in :attr:`unit_dir`.
+        :raises subprocess.CalledProcessError: if ``systemctl link`` fails, for
+            example because a regular file already occupies the destination.
         """
         ...
 
@@ -200,7 +214,8 @@ class SubprocessSystemdCtl:
         # An argument list with no shell. The optional leading prefix is operator
         # configuration from settings (SYSTEMD_ESCALATE), never user input; the
         # executable that follows it is always one of "systemctl", "install" or
-        # "rm", and unit names are confined to bare file names after "--".
+        # "rm". After "--" come bare unit file names, or, for "link", an absolute
+        # path chosen by the operator.
         result = subprocess.run(  # nosec B603
             cmd, capture_output=True, text=True, check=False
         )
@@ -328,11 +343,13 @@ class SubprocessSystemdCtl:
 
     def link_unit(self, source: Path) -> Path:
         source = source.absolute()
+        destination = self._unit_path(source.name)
         self._systemctl("link", "--force", units=[str(source)])
-        return self._unit_path(source.name)
+        return destination
 
     def linked_source(self, name: str) -> Path | None:
         path = self._unit_path(name)
         if path.is_symlink():
-            return Path(os.readlink(path))
+            target = Path(os.readlink(path))
+            return target if target.is_absolute() else path.parent / target
         return None
