@@ -1,0 +1,5 @@
+[Unit]
+Description=scope aware
+
+[Install]
+WantedBy={% if scope == "system" %}multi-user.target{% else %}default.target{% endif %}

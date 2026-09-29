@@ -16,6 +16,8 @@ default, or the invoking user's manager.
 
 from __future__ import annotations
 
+import shlex
+
 # Only for subprocess.CalledProcessError; commands run in protocol.py.
 import subprocess  # nosec B404
 import tempfile
@@ -25,12 +27,21 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management import CommandError
 from django.template import TemplateDoesNotExist, TemplateSyntaxError
-from django_typer.management import TyperCommand, command
+from django_typer.management import TyperCommand, command, initialize
 
-from django_systemd.config import ServiceUnit, project_units, render_engine, scope
-from django_systemd.defines import SystemdUnitType
+from django_systemd.config import (
+    ServiceUnit,
+    escalation,
+    install_method,
+    link_dir,
+    project_units,
+    render_engine,
+)
+from django_systemd.config import scope as settings_scope
+from django_systemd.defines import InstallMethod, SystemdScope, SystemdUnitType
 from django_systemd.protocol import SubprocessSystemdCtl, SystemdCtl
 from django_systemd.signals import unit_installed
 
@@ -75,9 +86,44 @@ class Command(TyperCommand):
     restart and reload this project's units.
     """
 
+    scope: SystemdScope
+    escalate: tuple[str, ...]
+
+    @initialize()
+    def init(
+        self,
+        scope: Annotated[
+            SystemdScope | None,
+            typer.Option(
+                "--scope",
+                help="Manage units in the system manager or the invoking user's "
+                "manager. Defaults to the SYSTEMD_SCOPE setting.",
+            ),
+        ] = None,
+        escalate: Annotated[
+            str | None,
+            typer.Option(
+                "--escalate",
+                help="Privilege escalation prefix for privileged calls in the "
+                'system scope, e.g. "sudo -n". Defaults to the SYSTEMD_ESCALATE '
+                "setting.",
+            ),
+        ] = None,
+    ) -> None:
+        try:
+            self.scope = scope or settings_scope()
+        except ImproperlyConfigured as err:
+            raise CommandError(str(err)) from err
+        try:
+            self.escalate = (
+                tuple(shlex.split(escalate)) if escalate is not None else escalation()
+            )
+        except ImproperlyConfigured as err:
+            raise CommandError(str(err)) from err
+
     @cached_property
     def ctl(self) -> SystemdCtl:
-        return SubprocessSystemdCtl(scope())
+        return SubprocessSystemdCtl(self.scope, escalate=self.escalate)
 
     @cached_property
     def units(self) -> list[ServiceUnit]:
@@ -146,6 +192,9 @@ class Command(TyperCommand):
         if not self.units:
             raise CommandError("No systemd unit templates found.")
         dest.mkdir(parents=True, exist_ok=True)
+        # scope always wins over a user-supplied override: it reflects the scope
+        # this very command is running in, e.g. after --scope user.
+        context = {**(context or {}), "scope": self.scope.value}
         rendered: list[tuple[ServiceUnit, Path]] = []
         for unit in self.units:
             # Absolute: render-static 3.5 builds a Path from a SafeString, which
@@ -153,7 +202,7 @@ class Command(TyperCommand):
             target = dest.absolute() / unit.filename
             try:
                 for render in render_engine().render_each(
-                    unit.template, dest=target, context=context or None
+                    unit.template, dest=target, context=context
                 ):
                     rendered.append((unit, Path(render.destination)))
             except (TemplateDoesNotExist, TemplateSyntaxError) as err:
@@ -209,6 +258,40 @@ class Command(TyperCommand):
         for _, path in rendered:
             typer.echo(str(path))
 
+    def permission_hint(self, unit: ServiceUnit, err: OSError) -> str:
+        """A CommandError message for a PermissionError raised by install/uninstall."""
+        message = f"Failed to install {unit.filename} to {self.ctl.unit_dir}: {err}."
+        if self.scope is SystemdScope.SYSTEM and not self.escalate:
+            message += (
+                " The system scope needs privileges: run as root, set SYSTEMD_ESCALATE"
+                ' (for example "sudo -n"), or install with --method link and polkit'
+                " rules. See the documentation on authorizing the deploy user."
+            )
+        return message
+
+    def _install_failure_message(
+        self, unit: ServiceUnit, err: subprocess.CalledProcessError
+    ) -> str:
+        """A CommandError message for a CalledProcessError from install_unit/link_unit."""
+        stderr = err.stderr or ""
+        if "File exists" in stderr:
+            return (
+                f"A copied unit file is already in the way at "
+                f"{self.ctl.unit_dir / unit.filename}. Run `systemd uninstall` "
+                "first, then retry with --method link."
+            )
+        if "Interactive authentication required" in stderr or "Access denied" in stderr:
+            return (
+                f"{describe_failure(err)} Add a polkit rule authorizing this user "
+                "for org.freedesktop.systemd1.manage-units, manage-unit-files and "
+                "reload-daemon; see the how-to's authorize section."
+            )
+        return describe_failure(err)
+
+    def _warn_if_world_writable(self, path: Path) -> None:
+        if path.stat().st_mode & 0o002:
+            typer.secho(f"warning: {path} is world-writable.", err=True)
+
     @command()
     def install(
         self,
@@ -227,23 +310,69 @@ class Command(TyperCommand):
                 "--enable/--no-enable", help="Enable the units after installing."
             ),
         ] = False,
+        method: Annotated[
+            InstallMethod | None,
+            typer.Option(
+                "--method",
+                help="Copy the units into the unit directory, or link them from "
+                "--link-dir. Defaults to the SYSTEMD_INSTALL_METHOD setting.",
+            ),
+        ] = None,
+        link_dir_option: Annotated[
+            Path | None,
+            typer.Option(
+                "--link-dir",
+                help="Where rendered units are kept when linking. Must be "
+                "absolute. Defaults to the SYSTEMD_LINK_DIR setting.",
+            ),
+        ] = None,
         context: ContextOption = None,
     ) -> None:
         """
-        Install this project's units into the user unit directory.
+        Install this project's units into the unit directory.
 
         Units are rendered first unless --source points at pre-rendered files.
         Running install again replaces the installed files, so this is also how
-        you update units after a deploy.
+        you update units after a deploy. With --method link, the rendered files
+        are kept in --link-dir and `systemctl link --force` places a symlink in
+        the unit directory instead of copying into it.
         """
         if not self.units:
             raise CommandError("No systemd unit templates found.")
         if source is not None and context:
             raise CommandError("--context has no effect with --source.")
 
+        try:
+            method = method or install_method()
+        except ImproperlyConfigured as err:
+            raise CommandError(str(err)) from err
+        try:
+            target_dir = link_dir_option or link_dir()
+        except ImproperlyConfigured as err:
+            raise CommandError(str(err)) from err
+
+        if method is InstallMethod.LINK and source is None:
+            if target_dir is None:
+                raise CommandError(
+                    "--method link needs a directory to keep the rendered units "
+                    "in: pass --link-dir or set SYSTEMD_LINK_DIR."
+                )
+            if not target_dir.is_absolute():
+                raise CommandError(f"--link-dir must be absolute, got {target_dir}.")
+            target_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+
         with tempfile.TemporaryDirectory() as tmp:
             if source is None:
-                files = self.render_units(Path(tmp), parse_context(context or []))
+                if method is InstallMethod.LINK:
+                    assert target_dir is not None  # validated above
+                    dest = target_dir
+                else:
+                    dest = Path(tmp)
+                files = self.render_units(dest, parse_context(context or []))
+                if method is InstallMethod.LINK:
+                    self._warn_if_world_writable(dest)
+                    for _, path in files:
+                        self._warn_if_world_writable(path)
             else:
                 # Pre-rendered units are flat files named by unit file name, exactly
                 # as `systemd render` writes them.
@@ -255,11 +384,20 @@ class Command(TyperCommand):
                     )
             for unit, path in files:
                 try:
-                    destination = self.ctl.install_unit(path)
+                    if method is InstallMethod.LINK:
+                        destination = self.ctl.link_unit(path)
+                    else:
+                        destination = self.ctl.install_unit(path)
+                except PermissionError as err:
+                    raise CommandError(self.permission_hint(unit, err)) from err
                 except OSError as err:
                     raise CommandError(
                         f"Failed to install {unit.filename} to {self.ctl.unit_dir}: {err}. "
                         "Re-run install once the cause is fixed."
+                    ) from err
+                except subprocess.CalledProcessError as err:
+                    raise CommandError(
+                        self._install_failure_message(unit, err)
                     ) from err
                 unit_installed.send(sender=self, unit=unit, destination=destination)
                 typer.echo(str(destination))
@@ -277,12 +415,13 @@ class Command(TyperCommand):
 
     @command()
     def uninstall(self) -> None:
-        """Stop, disable and remove this project's units from the user unit directory."""
+        """Stop, disable and remove this project's units from the unit directory."""
         for unit in self.units:
+            linked = self.ctl.linked_source(unit.filename)
             if (
                 self.ctl.available
                 and not unit.instanceable
-                and self.ctl.is_installed(unit.filename)
+                and (self.ctl.is_installed(unit.filename) or linked is not None)
             ):
                 for verb in (self.ctl.stop, self.ctl.disable):
                     try:
@@ -291,10 +430,25 @@ class Command(TyperCommand):
                         typer.secho(describe_failure(err), err=True)
             try:
                 removed = self.ctl.uninstall_unit(unit.filename)
+            except PermissionError as err:
+                if linked is None:
+                    raise CommandError(
+                        f"Failed to remove {unit.filename} from {self.ctl.unit_dir}: {err}"
+                    ) from err
+                typer.secho(
+                    f"{unit.filename} is still linked from {self.ctl.unit_dir}: {err}",
+                    err=True,
+                )
+                removed = False
             except OSError as err:
                 raise CommandError(
                     f"Failed to remove {unit.filename} from {self.ctl.unit_dir}: {err}"
                 ) from err
+            except subprocess.CalledProcessError as err:
+                raise CommandError(describe_failure(err)) from err
+            if linked is not None and linked.is_file():
+                linked.unlink()
+                removed = True
             if removed:
                 typer.echo(f"removed {unit.filename}")
         if self.ctl.available:
