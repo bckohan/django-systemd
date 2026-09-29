@@ -5,7 +5,9 @@ FakeCtl, so nothing here needs systemd installed.
 
 from __future__ import annotations
 
+import os
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
@@ -15,6 +17,7 @@ from django.core.management import CommandError, call_command
 from django.test import override_settings
 
 from django_systemd.config import ServiceUnit, render_engine, template_engine_config
+from django_systemd.defines import SystemdScope
 from django_systemd.management.commands.systemd import Command, parse_context
 from django_systemd.protocol import SystemdCtl
 from django_systemd.signals import unit_installed
@@ -29,9 +32,13 @@ class FakeCtl:
         *,
         available: bool = True,
         reloadable: set[str] | None = None,
+        scope: SystemdScope = SystemdScope.SYSTEM,
+        escalate: Sequence[str] = (),
     ) -> None:
         self.unit_dir = unit_dir
         self.available = available
+        self.scope = scope
+        self.escalate = tuple(escalate)
         self.reloadable = reloadable or set()
         self.calls: list[tuple[str, str]] = []
         self.active: set[str] = set()
@@ -41,10 +48,19 @@ class FakeCtl:
         self.fail: dict[str, str] = {}
 
     def _maybe_fail(self, verb: str, *args: str) -> None:
-        if verb in self.fail:
+        if verb not in self.fail:
+            return
+        value = self.fail[verb]
+        if verb in ("install", "uninstall"):
+            if value == "EACCES":
+                raise PermissionError(13, "Permission denied")
             raise subprocess.CalledProcessError(
-                1, ["systemctl", "--user", verb, *args], "", self.fail[verb]
+                1, ["sudo", "-n", verb, *args], "", value
             )
+        flags = [] if self.scope is SystemdScope.SYSTEM else ["--user"]
+        raise subprocess.CalledProcessError(
+            1, ["systemctl", *flags, verb, *args], "", value
+        )
 
     def daemon_reload(self) -> None:
         self._maybe_fail("daemon-reload")
@@ -75,6 +91,11 @@ class FakeCtl:
         self._maybe_fail("disable", unit)
         self.calls.append(("disable", unit))
         self.enabled.discard(unit)
+        # Mirrors "systemctl disable" on a unit installed with "systemctl link":
+        # disable removes the symlink it created in the unit directory.
+        destination = self.unit_dir / unit
+        if destination.is_symlink():
+            destination.unlink()
 
     def is_active(self, unit: str) -> bool:
         self._maybe_fail("is-active", unit)
@@ -92,6 +113,7 @@ class FakeCtl:
     def install_unit(
         self, source: Path, *, name: str | None = None, mode: int = 0o644
     ) -> Path:
+        self._maybe_fail("install", source.name)
         # Not recorded in self.calls: install ordering (e.g. daemon-reload coming
         # after every unit is copied) is asserted via daemon-reload's position.
         self.unit_dir.mkdir(parents=True, exist_ok=True)
@@ -100,12 +122,46 @@ class FakeCtl:
         return destination
 
     def uninstall_unit(self, name: str) -> bool:
+        self._maybe_fail("uninstall", name)
         destination = self.unit_dir / name
-        if destination.is_file():
+        if destination.is_file() or destination.is_symlink():
             self.calls.append(("uninstall", name))
             destination.unlink()
             return True
         return False
+
+    def link_unit(self, source: Path) -> Path:
+        self._maybe_fail("link", source.name)
+        self.unit_dir.mkdir(parents=True, exist_ok=True)
+        destination = self.unit_dir / source.name
+        if destination.exists() and not destination.is_symlink():
+            # Mirrors "systemctl link --force": a symlink is replaced, but a
+            # regular file at the destination is rejected.
+            raise subprocess.CalledProcessError(
+                1,
+                [
+                    "systemctl",
+                    "--no-ask-password",
+                    "link",
+                    "--force",
+                    "--",
+                    str(source),
+                ],
+                "",
+                f"Failed to link unit: File {destination} already exists.",
+            )
+        if destination.is_symlink():
+            destination.unlink()
+        destination.symlink_to(source.absolute())
+        self.calls.append(("link", source.name))
+        return destination
+
+    def linked_source(self, name: str) -> Path | None:
+        destination = self.unit_dir / name
+        if destination.is_symlink():
+            target = Path(os.readlink(destination))
+            return target if target.is_absolute() else destination.parent / target
+        return None
 
 
 @pytest.fixture
@@ -114,7 +170,8 @@ def fake_ctl(tmp_path):
     with mock.patch(
         "django_systemd.management.commands.systemd.SubprocessSystemdCtl",
         return_value=ctl,
-    ):
+    ) as constructor:
+        ctl.constructor = constructor
         yield ctl
 
 
@@ -149,6 +206,402 @@ def no_units():
 
 def test_fake_ctl_satisfies_protocol(tmp_path):
     assert isinstance(FakeCtl(tmp_path), SystemdCtl)
+
+
+@pytest.mark.django_db
+class TestScopeAndEscalation:
+    def test_defaults_come_from_settings(self, fake_ctl):
+        call_command("systemd", "list")
+        fake_ctl.constructor.assert_called_once_with(SystemdScope.SYSTEM, escalate=())
+
+    def test_scope_setting(self, fake_ctl):
+        with override_settings(SYSTEMD_SCOPE="user"):
+            call_command("systemd", "list")
+        fake_ctl.constructor.assert_called_once_with(SystemdScope.USER, escalate=())
+
+    def test_scope_flag_overrides_setting(self, fake_ctl):
+        call_command("systemd", "--scope", "user", "list")
+        fake_ctl.constructor.assert_called_once_with(SystemdScope.USER, escalate=())
+
+    def test_escalate_flag_and_setting(self, fake_ctl):
+        with override_settings(SYSTEMD_ESCALATE="doas"):
+            call_command("systemd", "list")
+        fake_ctl.constructor.assert_called_with(SystemdScope.SYSTEM, escalate=("doas",))
+        fake_ctl.constructor.reset_mock()
+        call_command("systemd", "--escalate", "sudo -n", "list")
+        fake_ctl.constructor.assert_called_with(
+            SystemdScope.SYSTEM, escalate=("sudo", "-n")
+        )
+
+    def test_invalid_scope_flag(self, fake_ctl):
+        # typer rejects the choice as a usage error; django-typer surfaces that as
+        # SystemExit or CommandError depending on version. Either is a rejection.
+        with pytest.raises((SystemExit, CommandError)):
+            call_command("systemd", "--scope", "root", "list")
+
+    def test_invalid_scope_setting_is_a_command_error(self, fake_ctl):
+        with override_settings(SYSTEMD_SCOPE="root"):
+            with pytest.raises(CommandError, match="SYSTEMD_SCOPE"):
+                call_command("systemd", "list")
+
+    def test_invalid_escalate_setting_is_a_command_error(self, fake_ctl):
+        with override_settings(SYSTEMD_ESCALATE=12345):
+            with pytest.raises(CommandError, match="SYSTEMD_ESCALATE"):
+                call_command("systemd", "list")
+
+    @pytest.mark.render
+    def test_scope_reaches_templates(self, fake_ctl, tmp_path):
+        apps = ["tests.apps.app3", *settings.INSTALLED_APPS]
+        with override_settings(
+            INSTALLED_APPS=apps, SYSTEMD_TEMPLATES=["**/scoped.service"]
+        ):
+            template_engine_config.cache_clear()
+            render_engine.cache_clear()
+            call_command("systemd", "render", str(tmp_path / "sys"))
+            call_command("systemd", "--scope", "user", "render", str(tmp_path / "usr"))
+        assert (
+            "WantedBy=multi-user.target"
+            in (tmp_path / "sys" / "scoped.service").read_text()
+        )
+        assert (
+            "WantedBy=default.target"
+            in (tmp_path / "usr" / "scoped.service").read_text()
+        )
+
+    def test_list_never_escalates(self, fake_ctl):
+        fake_ctl.unit_dir.mkdir(parents=True)
+        (fake_ctl.unit_dir / "web.service").write_text("x")
+        call_command("systemd", "--escalate", "sudo -n", "list")
+        verbs = {verb for verb, _ in fake_ctl.calls}
+        assert verbs <= {"is-active", "is-enabled"}
+
+
+@pytest.mark.django_db
+class TestLinkInstall:
+    def test_link_renders_into_link_dir_and_links(self, fake_ctl, tmp_path, capsys):
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        for name in ("web.service", "check.timer", "app@.target"):
+            assert (link_dir / name).is_file()
+            assert (fake_ctl.unit_dir / name).is_symlink()
+            assert (
+                fake_ctl.unit_dir.joinpath(name).resolve()
+                == (link_dir / name).resolve()
+            )
+        linked = [u for verb, u in fake_ctl.calls if verb == "link"]
+        assert sorted(linked) == ["app@.target", "check.timer", "web.service"]
+        assert fake_ctl.calls[-1] == ("daemon-reload", "")
+        assert str(fake_ctl.unit_dir / "web.service") in capsys.readouterr().out
+
+    def test_link_from_settings(self, fake_ctl, tmp_path):
+        with override_settings(
+            SYSTEMD_INSTALL_METHOD="link", SYSTEMD_LINK_DIR=str(tmp_path / "r")
+        ):
+            call_command("systemd", "install")
+        assert (fake_ctl.unit_dir / "web.service").is_symlink()
+
+    def test_link_requires_a_link_dir(self, fake_ctl):
+        with pytest.raises(CommandError, match="--link-dir"):
+            call_command("systemd", "install", "--method", "link")
+
+    def test_link_dir_must_be_absolute(self, fake_ctl):
+        with pytest.raises(CommandError, match="absolute"):
+            call_command(
+                "systemd", "install", "--method", "link", "--link-dir", "relative/dir"
+            )
+
+    def test_link_requires_systemctl(self, make_ctl, tmp_path):
+        make_ctl(available=False)
+        link_dir = tmp_path / "rendered"
+        with pytest.raises(CommandError, match="systemctl"):
+            call_command(
+                "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+            )
+        assert not link_dir.exists()
+
+    def test_link_from_source_dir(self, fake_ctl, tmp_path):
+        source = tmp_path / "pre"
+        source.mkdir()
+        for name in ("web.service", "check.timer", "app@.target"):
+            (source / name).write_text("pre")
+        call_command("systemd", "install", "--method", "link", "--source", str(source))
+        assert (fake_ctl.unit_dir / "web.service").resolve() == (
+            source / "web.service"
+        ).resolve()
+
+    def test_rerun_relinks(self, fake_ctl, tmp_path):
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        assert (fake_ctl.unit_dir / "web.service").is_symlink()
+
+    def test_uninstall_removes_linked_source(self, fake_ctl, tmp_path):
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        call_command("systemd", "uninstall", "--link-dir", str(link_dir))
+        assert not any(link_dir.iterdir())
+        assert not any(fake_ctl.unit_dir.iterdir())
+        assert ("disable", "web.service") in fake_ctl.calls
+
+    def test_uninstall_removes_linked_source_via_setting(self, fake_ctl, tmp_path):
+        link_dir = tmp_path / "rendered"
+        with override_settings(SYSTEMD_LINK_DIR=str(link_dir)):
+            call_command("systemd", "install", "--method", "link")
+            call_command("systemd", "uninstall")
+        assert not any(link_dir.iterdir())
+        assert not any(fake_ctl.unit_dir.iterdir())
+
+    def test_uninstall_matches_link_dir_through_a_directory_symlink(
+        self, fake_ctl, tmp_path
+    ):
+        real = tmp_path / "real"
+        real.mkdir()
+        alias = tmp_path / "alias"
+        alias.symlink_to(real)
+        call_command("systemd", "install", "--method", "link", "--link-dir", str(alias))
+        call_command("systemd", "uninstall", "--link-dir", str(real))
+        assert not any(real.iterdir())
+        assert not any(fake_ctl.unit_dir.iterdir())
+
+    def test_uninstall_relative_link_dir_is_a_command_error(self, fake_ctl):
+        with pytest.raises(CommandError, match="absolute"):
+            call_command("systemd", "uninstall", "--link-dir", "relative/dir")
+
+    def test_uninstall_without_link_dir_leaves_source_in_place(
+        self, fake_ctl, tmp_path, capsys
+    ):
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        call_command("systemd", "uninstall")
+        assert (link_dir / "web.service").is_file()
+        err = capsys.readouterr().err
+        assert "left" in err and "in place" in err
+
+    def test_uninstall_leaves_source_installed_units_in_place(
+        self, fake_ctl, tmp_path, capsys
+    ):
+        source = tmp_path / "pre"
+        source.mkdir()
+        for name in ("web.service", "check.timer", "app@.target"):
+            (source / name).write_text("pre")
+        call_command("systemd", "install", "--method", "link", "--source", str(source))
+        call_command("systemd", "uninstall")
+        assert (source / "web.service").is_file()
+        err = capsys.readouterr().err
+        assert "left" in err and "in place" in err
+
+    def test_uninstall_unlink_failure_is_reported_not_fatal(
+        self, fake_ctl, tmp_path, capsys, monkeypatch
+    ):
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        original_unlink = Path.unlink
+
+        def flaky_unlink(self, *args, **kwargs):
+            if self.parent == link_dir and self.name == "web.service":
+                raise OSError("disk full")
+            return original_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", flaky_unlink)
+        call_command("systemd", "uninstall", "--link-dir", str(link_dir))
+        err = capsys.readouterr().err
+        assert "could not remove" in err
+        assert (link_dir / "web.service").exists()
+
+    def test_uninstall_reports_leftover_symlink(self, fake_ctl, tmp_path, capsys):
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        fake_ctl.fail = {"disable": "Failed to connect to bus", "uninstall": "EACCES"}
+        call_command("systemd", "uninstall", "--link-dir", str(link_dir))
+        err = capsys.readouterr().err
+        assert "still linked" in err
+        assert not (link_dir / "web.service").exists()
+
+    def test_link_over_copied_unit_names_the_conflict(self, fake_ctl, tmp_path):
+        call_command("systemd", "install")
+        with pytest.raises(CommandError, match="systemd uninstall"):
+            call_command(
+                "systemd",
+                "install",
+                "--method",
+                "link",
+                "--link-dir",
+                str(tmp_path / "r"),
+            )
+        assert (fake_ctl.unit_dir / "web.service").is_file()
+        assert not (fake_ctl.unit_dir / "web.service").is_symlink()
+        assert not any(verb == "link" for verb, _ in fake_ctl.calls)
+
+    def test_link_race_conflict_falls_back_to_stderr(self, fake_ctl, tmp_path):
+        # The proactive is_installed/linked_source check can't catch a genuine
+        # race (something else occupies the destination between our check and
+        # systemctl link); the stderr fallback in _install_failure_message
+        # covers that case, recognizing systemd's own "already exists" wording.
+        fake_ctl.fail = {"link": "Failed to link unit: File already exists."}
+        with pytest.raises(CommandError, match="systemd uninstall"):
+            call_command(
+                "systemd",
+                "install",
+                "--method",
+                "link",
+                "--link-dir",
+                str(tmp_path / "r"),
+            )
+
+    def test_link_dir_is_a_file(self, fake_ctl, tmp_path):
+        target = tmp_path / "not-a-dir"
+        target.write_text("x")
+        with pytest.raises(CommandError, match="not a directory"):
+            call_command(
+                "systemd", "install", "--method", "link", "--link-dir", str(target)
+            )
+
+    def test_link_dir_with_source_is_an_error(self, fake_ctl, tmp_path):
+        source = tmp_path / "pre"
+        source.mkdir()
+        with pytest.raises(CommandError, match="--link-dir"):
+            call_command(
+                "systemd",
+                "install",
+                "--method",
+                "link",
+                "--source",
+                str(source),
+                "--link-dir",
+                str(tmp_path / "r"),
+            )
+
+    def test_world_writable_source_file_warns(self, fake_ctl, tmp_path, capsys):
+        source = tmp_path / "pre"
+        source.mkdir()
+        for name in ("web.service", "check.timer", "app@.target"):
+            (source / name).write_text("pre")
+        (source / "web.service").chmod(0o666)
+        call_command("systemd", "install", "--method", "link", "--source", str(source))
+        assert "world-writable" in capsys.readouterr().err
+
+    def test_polkit_denial_hints_at_the_rule(self, fake_ctl, tmp_path):
+        fake_ctl.fail = {"link": "Interactive authentication required."}
+        with pytest.raises(CommandError, match="polkit"):
+            call_command(
+                "systemd",
+                "install",
+                "--method",
+                "link",
+                "--link-dir",
+                str(tmp_path / "r"),
+            )
+
+    def test_world_writable_link_dir_warns(self, fake_ctl, tmp_path, capsys):
+        link_dir = tmp_path / "rendered"
+        link_dir.mkdir()
+        link_dir.chmod(0o777)
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        assert "world-writable" in capsys.readouterr().err
+
+    def test_invalid_install_method_setting_is_a_command_error(self, fake_ctl):
+        with override_settings(SYSTEMD_INSTALL_METHOD="teleport"):
+            with pytest.raises(CommandError, match="SYSTEMD_INSTALL_METHOD"):
+                call_command("systemd", "install")
+
+    def test_invalid_link_dir_setting_is_a_command_error(self, fake_ctl):
+        with override_settings(
+            SYSTEMD_INSTALL_METHOD="link", SYSTEMD_LINK_DIR="relative/dir"
+        ):
+            with pytest.raises(CommandError, match="SYSTEMD_LINK_DIR"):
+                call_command("systemd", "install")
+
+    def test_link_dir_created_with_0755(self, fake_ctl, tmp_path):
+        link_dir = tmp_path / "rendered"
+        old_umask = os.umask(0)
+        try:
+            call_command(
+                "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+            )
+        finally:
+            os.umask(old_umask)
+        assert link_dir.stat().st_mode & 0o777 == 0o755
+
+    def test_dangling_link_is_still_disabled(self, fake_ctl, tmp_path):
+        # The rendered source is deleted before uninstall runs: the symlink in
+        # unit_dir is now dangling, so is_installed is False, but linked_source
+        # still finds it and stop/disable must still run to remove the link.
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        for f in link_dir.iterdir():
+            f.unlink()
+        assert not fake_ctl.is_installed("web.service")
+        call_command("systemd", "uninstall")
+        disabled = {unit for verb, unit in fake_ctl.calls if verb == "disable"}
+        assert "web.service" in disabled
+
+
+@pytest.mark.django_db
+class TestPermissionErrors:
+    def test_copy_permission_error_is_actionable(self, fake_ctl):
+        fake_ctl.fail = {"install": "EACCES"}
+        with pytest.raises(CommandError) as exc:
+            call_command("systemd", "install")
+        message = str(exc.value)
+        for hint in ("root", "SYSTEMD_ESCALATE", "--method link"):
+            assert hint in message
+
+    def test_user_scope_permission_error_has_no_escalation_hint(self, fake_ctl):
+        fake_ctl.fail = {"install": "EACCES"}
+        with pytest.raises(CommandError) as exc:
+            call_command("systemd", "--scope", "user", "install")
+        assert "SYSTEMD_ESCALATE" not in str(exc.value)
+
+    def test_escalated_install_failure_shows_stderr(self, fake_ctl):
+        fake_ctl.fail = {"install": "sudo: a password is required"}
+        with pytest.raises(CommandError, match="password is required"):
+            call_command("systemd", "--escalate", "sudo -n", "install")
+
+    def test_escalated_uninstall_failure_shows_stderr(self, fake_ctl):
+        call_command("systemd", "install")
+        fake_ctl.fail = {"uninstall": "sudo: a password is required"}
+        with pytest.raises(CommandError, match="password is required"):
+            call_command("systemd", "--escalate", "sudo -n", "uninstall")
+
+    def test_uninstall_permission_error_without_link_is_fatal(self, fake_ctl):
+        call_command("systemd", "install")
+        fake_ctl.fail = {"uninstall": "EACCES"}
+        with pytest.raises(CommandError) as exc:
+            call_command("systemd", "uninstall")
+        message = str(exc.value)
+        assert "still linked" not in message
+        for hint in ("root", "SYSTEMD_ESCALATE", "--method link"):
+            assert hint in message
+
+    def test_uninstall_permission_error_user_scope_no_hint(self, fake_ctl):
+        call_command("systemd", "--scope", "user", "install")
+        fake_ctl.fail = {"uninstall": "EACCES"}
+        with pytest.raises(CommandError) as exc:
+            call_command("systemd", "--scope", "user", "uninstall")
+        assert "SYSTEMD_ESCALATE" not in str(exc.value)
+
+    def test_daemon_reload_polkit_denial_hints_at_the_rule(self, fake_ctl):
+        fake_ctl.fail = {"daemon-reload": "Interactive authentication required."}
+        with pytest.raises(CommandError, match="polkit"):
+            call_command("systemd", "install")
 
 
 @pytest.mark.django_db
@@ -319,6 +772,10 @@ class TestRender:
         assert "nested web (app3)" in content
         assert not (tmp_path / "sub").exists()
 
+    def test_context_cannot_set_scope(self, fake_ctl, tmp_path):
+        with pytest.raises(CommandError, match="--scope"):
+            call_command("systemd", "render", str(tmp_path), "-c", "scope=user")
+
 
 @pytest.mark.django_db
 class TestInstall:
@@ -449,6 +906,10 @@ class TestInstall:
         fake_ctl.fail = {"daemon-reload": ""}
         with pytest.raises(CommandError, match="exit status 1"):
             call_command("systemd", "install")
+
+    def test_context_cannot_set_scope(self, fake_ctl):
+        with pytest.raises(CommandError, match="--scope"):
+            call_command("systemd", "install", "-c", "scope=user")
 
 
 @pytest.mark.django_db

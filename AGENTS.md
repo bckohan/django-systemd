@@ -9,7 +9,7 @@ This file is for Claude Code and other AI coding assistants working in this repo
 1. Generate systemd files. These files can be generated
   1. At package time and committed to CI with known settings
   2. At deploy time from live production settings
-2. Manage systemd units - installing/updating/listing them. We assume that systemd units are all meant to be run as the user not as root.
+2. Manage systemd units - installing/updating/listing them. Units are managed in the system scope by default and run as the ``User=`` they name; privileges come from root, an explicit escalation prefix, or polkit with the link method. The user scope remains available.
 
 A Django application library. Source lives in `src/django_systemd/`. Tests are in `tests/`. Documentation is in `doc/`.
 

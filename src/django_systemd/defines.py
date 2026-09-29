@@ -155,3 +155,36 @@ class SystemdRestartType(StrEnum):
 
     ALWAYS = "always"
     """Restarts regardless of exit status, signal termination, or timeout."""
+
+
+class SystemdScope(StrEnum):
+    """Which systemd manager owns the project's units."""
+
+    SYSTEM = "system"
+    """
+    The system manager. Units live in ``/etc/systemd/system``, start at boot, and
+    run as the ``User=`` they name (root if they name none). Managing them needs
+    root, an escalation prefix such as ``sudo -n``, or polkit rules.
+    """
+
+    USER = "user"
+    """
+    The invoking user's manager (``systemctl --user``). Units live in
+    ``$XDG_CONFIG_HOME/systemd/user`` (usually ``~/.config/systemd/user``), run
+    as that user, and need no privileges, but the manager only runs while the
+    user has a session or lingering is enabled.
+    """
+
+
+class InstallMethod(StrEnum):
+    """How ``install`` puts a unit into the unit search path."""
+
+    COPY = "copy"
+    """Copy the rendered file into the unit directory. Needs write access there."""
+
+    LINK = "link"
+    """
+    Keep the rendered file in a directory the deploying user owns and have
+    ``systemctl link`` place a symlink in the unit directory. Needs only
+    systemd's own authorization (polkit), never file system privileges.
+    """

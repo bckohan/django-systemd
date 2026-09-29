@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import shlex
 import sys
 import typing as t
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from pathlib import Path
 from render_static.context import resolve_context
 from render_static.engine import StaticTemplateEngine
 
-from .defines import SystemdUnitType
+from .defines import InstallMethod, SystemdScope, SystemdUnitType
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,109 @@ class ServiceUnit:
         raise ValueError(f"Unrecognized unit name: '{name}'")
 
 
+def scope() -> SystemdScope:
+    """
+    The scope units are managed in, from the ``SYSTEMD_SCOPE`` setting.
+
+    Defaults to :attr:`~django_systemd.defines.SystemdScope.SYSTEM`. The setting
+    may be a :class:`~django_systemd.defines.SystemdScope` or its string value.
+
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is not a
+        recognised scope.
+    """
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    value = getattr(settings, "SYSTEMD_SCOPE", SystemdScope.SYSTEM)
+    try:
+        return SystemdScope(value)
+    except ValueError as err:
+        raise ImproperlyConfigured(
+            f"SYSTEMD_SCOPE must be one of "
+            f"{', '.join(s.value for s in SystemdScope)}, got {value!r}."
+        ) from err
+
+
+def escalation() -> tuple[str, ...]:
+    """
+    The privilege escalation prefix from the ``SYSTEMD_ESCALATE`` setting.
+
+    Either a command string such as ``"sudo -n"`` (split with :mod:`shlex`) or a
+    sequence of arguments. Empty or ``None`` means no escalation. It is only
+    applied to privileged calls in the system scope, and never when already root.
+
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is
+        neither a string nor a sequence of arguments, or a string :mod:`shlex`
+        cannot parse.
+    """
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    value = getattr(settings, "SYSTEMD_ESCALATE", None)
+    if not value:
+        return ()
+    if isinstance(value, str):
+        try:
+            return tuple(shlex.split(value))
+        except ValueError as err:
+            raise ImproperlyConfigured(
+                "SYSTEMD_ESCALATE must be a command string such as "
+                f'"sudo -n" or a sequence of arguments, got {value!r}.'
+            ) from err
+    if hasattr(value, "__iter__"):
+        return tuple(str(part) for part in value)
+    raise ImproperlyConfigured(
+        "SYSTEMD_ESCALATE must be a command string such as "
+        f'"sudo -n" or a sequence of arguments, got {value!r}.'
+    )
+
+
+def install_method() -> InstallMethod:
+    """
+    The unit install method, from the ``SYSTEMD_INSTALL_METHOD`` setting.
+
+    Defaults to :attr:`~django_systemd.defines.InstallMethod.COPY`. The setting
+    may be an :class:`~django_systemd.defines.InstallMethod` or its string value.
+
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is not a
+        recognised install method.
+    """
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    value = getattr(settings, "SYSTEMD_INSTALL_METHOD", InstallMethod.COPY)
+    try:
+        return InstallMethod(value)
+    except ValueError as err:
+        raise ImproperlyConfigured(
+            f"SYSTEMD_INSTALL_METHOD must be one of "
+            f"{', '.join(m.value for m in InstallMethod)}, got {value!r}."
+        ) from err
+
+
+def link_dir() -> Path | None:
+    """
+    The ``SYSTEMD_LINK_DIR`` setting: where rendered units are kept when the
+    install method is :attr:`~django_systemd.defines.InstallMethod.LINK`.
+
+    :return: A :class:`~pathlib.Path`, or ``None`` when unset.
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is a
+        relative path.
+    """
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    value = getattr(settings, "SYSTEMD_LINK_DIR", None)
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        raise ImproperlyConfigured(
+            f"SYSTEMD_LINK_DIR must be an absolute path, got {value!r}."
+        )
+    return path
+
+
 @cache
 def template_engine_config() -> dict[str, t.Any]:
     """
@@ -135,6 +239,15 @@ def template_engine_config() -> dict[str, t.Any]:
     engine_config["context"].setdefault(
         "DJANGO_SETTINGS_MODULE", os.environ.get("DJANGO_SETTINGS_MODULE", "")
     )
+    resolved_scope = scope().value
+    existing_scope = engine_config["context"].get("scope")
+    if existing_scope is not None and existing_scope != resolved_scope:
+        logger.warning(
+            "Ignoring scope=%r in SYSTEMD_TEMPLATE_CONTEXT; the scope is set by "
+            "SYSTEMD_SCOPE",
+            existing_scope,
+        )
+    engine_config["context"]["scope"] = resolved_scope
     return engine_config
 
 

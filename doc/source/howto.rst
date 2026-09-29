@@ -14,8 +14,10 @@ Templates are Django templates and receive the context described in
 app listed first in ``INSTALLED_APPS`` wins. Which templates are discovered is
 controlled by the :setting:`SYSTEMD_TEMPLATES` patterns.
 
-Units run in the user manager, so omit ``User=`` and hook into ``default.target``
-rather than ``multi-user.target``:
+``scope`` is always in the template context, so one template can serve either
+scope. In the system scope the unit needs a ``User=`` and hooks into
+``multi-user.target``; in the user scope it omits ``User=`` and hooks into
+``default.target``:
 
 .. code-block:: ini
 
@@ -23,22 +25,120 @@ rather than ``multi-user.target``:
     Description={{ settings.PROJECT_NAME|default:"Django" }} web
 
     [Service]
-    ExecStart={{ python }} -m gunicorn --bind unix:%t/web.sock myproject.wsgi
+    {% if scope == "system" %}User=www-data{% endif %}
+    ExecStart={{ python }} -m gunicorn --bind 127.0.0.1:8000 myproject.wsgi
     WorkingDirectory={{ venv }}
     Environment=DJANGO_SETTINGS_MODULE={{ DJANGO_SETTINGS_MODULE }}
     Restart=on-failure
 
     [Install]
-    WantedBy=default.target
+    WantedBy={% if scope == "system" %}multi-user.target{% else %}default.target{% endif %}
+
+.. _authorize:
+
+Authorize the deploy user
+--------------------------
+
+By default units are managed in the system scope: they are installed under
+``/etc/systemd/system``, start at boot, and run as the ``User=`` they name.
+Changing them needs privileges. :pypi:`django-systemd` never guesses how to get
+them; pick one of these routes. ``list`` needs none of them: it only reads.
+
+Run the command as root
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The simplest route. Nothing needs configuring; the command reads, writes and
+talks to systemd directly.
+
+.. code-block:: bash
+
+    sudo -E /srv/mysite/.venv/bin/python -m django systemd install --enable
+
+``-E`` keeps ``DJANGO_SETTINGS_MODULE`` and the rest of your environment.
+
+An escalation prefix
+~~~~~~~~~~~~~~~~~~~~~
+
+Run the command as the deploy user and let it prefix only the privileged calls.
+Set :setting:`SYSTEMD_ESCALATE` (or pass ``--escalate``):
+
+.. code-block:: python
+
+    SYSTEMD_ESCALATE = "sudo -n"
+
+The prefixed programs are ``systemctl``, ``install`` and ``rm``, so this sudoers
+rule is all the deploy user needs:
+
+.. code-block:: text
+
+    deploy ALL=(root) NOPASSWD: /usr/bin/systemctl, /usr/bin/install, /usr/bin/rm
+
+Templates, rendering and every read-only query still run as the deploy user.
+``-n`` makes sudo fail instead of prompting when the rule is missing.
+
+Polkit and the link method
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+systemd authorizes ``systemctl`` through polkit, so a rule can let the deploy
+user manage units without sudo at all. What polkit cannot grant is writing to
+``/etc/systemd/system``, so pair it with the link install method: units are
+rendered into a directory the deploy user owns and ``systemctl link`` puts
+symlinks in the unit directory.
+
+.. code-block:: python
+
+    SYSTEMD_INSTALL_METHOD = "link"
+    SYSTEMD_LINK_DIR = "/srv/mysite/units"
+
+``SYSTEMD_LINK_DIR`` must be an absolute path outside systemd's unit search
+path, and on a file system that is mounted at boot: systemd reads the linked
+file as root during early boot, so a separately mounted ``/home`` is not
+suitable. ``install`` creates it with mode ``0755`` before the umask is
+applied, and warns on stderr if it, or a rendered unit file, is world-writable.
+
+Save this as ``/etc/polkit-1/rules.d/50-mysite-deploy.rules``:
+
+.. code-block:: javascript
+
+    polkit.addRule(function(action, subject) {
+        if (subject.user == "deploy" &&
+            (action.id == "org.freedesktop.systemd1.manage-units" ||
+             action.id == "org.freedesktop.systemd1.manage-unit-files" ||
+             action.id == "org.freedesktop.systemd1.reload-daemon")) {
+            return polkit.Result.YES;
+        }
+    });
+
+``manage-units`` covers start, stop, restart and reload; ``manage-unit-files``
+covers enable, disable and link; ``reload-daemon`` covers ``daemon-reload``. To
+restrict the rule to the project's units, test ``action.lookup("unit")`` against
+their names. A denial from any of these (stderr containing "Interactive
+authentication required" or "Access denied") is reported with a hint pointing
+back at this section.
+
+Note that a user who may link unit files can run anything as root through a
+unit, so this grants the deploy user root-equivalent power over the machine,
+as does the sudoers rule above.
+
+``uninstall`` removes the symlink through ``disable`` and then deletes the
+rendered file, but only when it can confirm which link directory it owns: pass
+``--link-dir`` (or set :setting:`SYSTEMD_LINK_DIR`) to the same directory the
+unit was installed with. A unit linked from elsewhere, for example one supplied
+with ``install --source``, is left in place with a notice naming it.
+
+Trying to link over a unit file that a previous ``install`` copied into place
+fails with a message telling you to run ``systemd uninstall`` first; systemd
+itself refuses to replace a regular file with a link.
 
 .. _user-scope:
 
-Everything runs as the user
-----------------------------
+Run in the user scope instead
+------------------------------
 
-All commands use ``systemctl --user`` and install into
-``$XDG_CONFIG_HOME/systemd/user`` (``~/.config/systemd/user`` by default). Nothing
-in :pypi:`django-systemd` runs as root. Two consequences:
+With ``--scope user`` or ``SYSTEMD_SCOPE = "user"`` everything uses
+``systemctl --user`` and installs into ``$XDG_CONFIG_HOME/systemd/user``
+(``~/.config/systemd/user`` by default). No privileges are needed and the units
+run as the deploying user.
 
 - Talking to the user manager from a non-login session, for example over SSH as a
   deploy user, requires lingering to be enabled once for that user, or
@@ -60,12 +160,16 @@ collide with another project's units in the same unit directory.
     **Developing without systemd**
 
     ``render`` and ``list`` work on any machine, with or without systemd.
-    ``install`` still copies unit files into the user unit directory; if
-    ``systemctl`` is not found it skips the rest and prints "systemctl not found;
-    skipped daemon-reload and enable." ``uninstall`` behaves the same way,
-    printing "systemctl not found; skipped stop, disable and daemon-reload."
-    ``restart`` and ``reload`` need systemctl and fail outright with "systemctl
-    is not available on this system."
+    ``install --method copy`` (the default) still copies unit files into the
+    unit directory; if ``systemctl`` is not found it skips the rest and prints
+    "systemctl not found; skipped daemon-reload and enable." ``install
+    --method link`` needs ``systemctl link`` to place the symlink, so without
+    systemctl it refuses outright with "--method link needs systemctl, which
+    is not available on this system," before rendering anything or creating
+    the link directory. ``uninstall`` behaves like the copy method, printing
+    "systemctl not found; skipped stop, disable and daemon-reload." ``restart``
+    and ``reload`` need systemctl and fail outright with "systemctl is not
+    available on this system."
 
 See which units belong to the project
 --------------------------------------
@@ -74,7 +178,7 @@ See which units belong to the project
 
     django-admin systemd list
 
-Each row shows the unit, whether it is installed in the user unit directory,
+Each row shows the unit, whether it is installed in the unit directory,
 whether it is enabled and active, and which template it comes from. State columns
 show ``-`` for units that are not installed, for template units (``name@.type``),
 and when ``systemctl`` is not available.
@@ -105,9 +209,9 @@ Django settings must still load successfully on the host.
 Render and install at deploy time
 ---------------------------------
 
-``--enable`` makes the units start with the user manager at login or boot; it
-does not start them now. ``restart`` starts units that are not running and
-restarts the ones that are.
+``--enable`` makes the units start with the manager at login or boot; it does
+not start them now. ``restart`` starts units that are not running and restarts
+the ones that are.
 
 On the host, with production settings active:
 
@@ -118,7 +222,7 @@ On the host, with production settings active:
 
 Running ``install`` again replaces the installed unit files, so it doubles as the
 update step. The :data:`~django_systemd.signals.unit_installed` signal fires for
-each unit as it is copied.
+each unit as it is installed.
 
 Restart or reload after a deploy
 --------------------------------
@@ -138,6 +242,8 @@ Two systemd behaviours to know about:
 - A service triggered by a timer or path unit of the same name (typically a
   oneshot job) is not restarted by default, because that would run the job.
   Name it explicitly to restart it.
+- None of this depends on scope: ``restart`` and ``reload`` behave the same way
+  whether the units are managed in the system or the user scope.
 
 Restart units from a deployment routine
 ---------------------------------------

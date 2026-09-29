@@ -27,16 +27,44 @@ Prerequisites
   your own names.
 - Python 3.11 or later.
 
-Everything runs as the ``deploy`` user, in the systemd user manager. Nothing in
-this tutorial needs ``sudo``. If you deploy over SSH, enable lingering for the
-user once, so the user manager keeps running after you log out and is reachable
-from a non-login session:
+Units are managed in the system scope by default: they are installed under
+``/etc/systemd/system``, start at boot, and run as the ``User=`` they name
+rather than as ``deploy``. This tutorial creates a dedicated ``mysite`` service
+user for the units to run as, and gives the ``deploy`` user just enough
+privilege, through a sudoers rule, to install and manage them. See
+:ref:`authorize` for the other two routes (running the command as root, or
+polkit with the link install method) if this one does not fit your host.
+
+Create the service user
+========================
+
+The units should run as a user of their own, not as ``deploy`` and not as
+root. Create a system account with no login shell:
 
 .. code-block:: bash
 
-    loginctl enable-linger deploy
+    sudo useradd --system --home /srv/mysite --shell /usr/sbin/nologin mysite
 
-See :ref:`user-scope` for what this does and how to tell when it is missing.
+Give that user read access to the checkout without changing who owns it:
+
+.. code-block:: bash
+
+    sudo chgrp -R mysite /srv/mysite
+    sudo chmod -R g+rX /srv/mysite
+
+The site also writes to some of that checkout: uploads go to a ``media/``
+directory, and the default ``db.sqlite3`` database is a file SQLite writes to
+directly. Grant the ``mysite`` group write access to those paths, and, since
+SQLite also creates a journal file next to the database, to ``BASE_DIR``
+itself:
+
+.. code-block:: bash
+
+    sudo chgrp mysite /srv/mysite /srv/mysite/media /srv/mysite/db.sqlite3
+    sudo chmod g+w /srv/mysite /srv/mysite/media /srv/mysite/db.sqlite3
+
+A real deployment usually points ``DATABASES`` at a database server instead of
+SQLite, which does not need this.
 
 Install the packages
 ====================
@@ -48,7 +76,13 @@ the server that the web service will run:
 
     cd /srv/mysite
     source .venv/bin/activate
+    export DJANGO_SETTINGS_MODULE=mysite.settings
     pip install django-systemd gunicorn uvicorn-worker
+
+Every ``django-admin``/``python -m django`` command in the rest of this
+tutorial needs ``DJANGO_SETTINGS_MODULE`` set; a deploy script or routine
+that runs them non-interactively should set it too, rather than rely on an
+activated shell.
 
 Add ``django_systemd`` to ``INSTALLED_APPS``:
 
@@ -58,6 +92,25 @@ Add ``django_systemd`` to ``INSTALLED_APPS``:
         ...,
         "django_systemd",
     ]
+
+In your production settings, authorize the ``deploy`` user to run the
+privileged parts of the ``systemd`` command without a password:
+
+.. code-block:: python
+
+    SYSTEMD_ESCALATE = "sudo -n"
+
+and add the matching sudoers rule (for example in
+``/etc/sudoers.d/mysite-deploy``):
+
+.. code-block:: text
+
+    deploy ALL=(root) NOPASSWD: /usr/bin/systemctl, /usr/bin/install, /usr/bin/rm
+
+``-n`` makes sudo fail instead of prompting when the rule is missing, and the
+prefix is only ever applied to the ``systemctl``, ``install`` and ``rm`` calls
+that change state; reads such as ``systemd list`` still run as ``deploy``
+directly.
 
 Create an app for the unit templates
 ====================================
@@ -86,6 +139,8 @@ Create ``deploy/systemd/mysite-web.service``:
 
     [Service]
     Type=simple
+    User=mysite
+    Group=mysite
     WorkingDirectory={{ settings.BASE_DIR }}
     Environment=DJANGO_SETTINGS_MODULE={{ DJANGO_SETTINGS_MODULE }}
     ExecStart={{ venv }}/bin/gunicorn mysite.asgi:application \
@@ -96,7 +151,7 @@ Create ``deploy/systemd/mysite-web.service``:
     Restart=on-failure
 
     [Install]
-    WantedBy=default.target
+    WantedBy=multi-user.target
 
 This is a Django template. The values in double braces come from the
 :setting:`SYSTEMD_TEMPLATE_CONTEXT`, which always includes:
@@ -109,17 +164,15 @@ This is a Django template. The values in double braces come from the
 - ``DJANGO_SETTINGS_MODULE``, so the service uses the same settings the deploy
   did.
 
-Three things about this unit are specific to running under the user manager
-rather than as root:
+Three things about this unit are specific to the system scope:
 
-- There is no ``User=`` line. The unit already runs as the user who installs
-  it.
-- ``WantedBy=default.target``. The user manager has no ``multi-user.target``;
-  ``default.target`` is what it reaches at startup.
-- The service binds to a loopback port. A Unix socket under the user's runtime
-  directory (``%t``) is only readable by that user, so a reverse proxy running
-  as another user could not reach it. Point your reverse proxy at
-  ``http://127.0.0.1:8000``.
+- ``User=mysite`` and ``Group=mysite``. Without a ``User=``, a system unit runs
+  as root; naming the service user keeps it from doing so.
+- ``WantedBy=multi-user.target``, the system manager's normal boot target,
+  rather than the user manager's ``default.target``.
+- The service binds to a loopback port rather than a socket under a user's
+  runtime directory, so a reverse proxy running as another user can still
+  reach it at ``http://127.0.0.1:8000``.
 
 ``ExecReload`` matters later. It lets gunicorn reload its workers in place when
 you deploy new code, without dropping connections.
@@ -137,6 +190,8 @@ Create ``deploy/systemd/mysite-dbcheck.service``:
 
     [Service]
     Type=oneshot
+    User=mysite
+    Group=mysite
     WorkingDirectory={{ settings.BASE_DIR }}
     Environment=DJANGO_SETTINGS_MODULE={{ DJANGO_SETTINGS_MODULE }}
     ExecStart={{ python }} -m django check --database default
@@ -162,7 +217,9 @@ Now the timer, ``deploy/systemd/mysite-dbcheck.timer``:
 
 A timer starts the service with the same name, so ``mysite-dbcheck.timer``
 starts ``mysite-dbcheck.service``. ``Persistent=true`` runs the check on the
-next start if the machine was off when one was due.
+next start if the machine was off when one was due. ``WantedBy=timers.target``
+is the system manager's target for timers, the counterpart of
+``multi-user.target`` for services.
 
 See what the project defines
 ============================
@@ -181,9 +238,9 @@ directory:
     mysite-dbcheck.service   no         -        -        /srv/mysite/deploy/systemd/mysite-dbcheck.service
     mysite-dbcheck.timer     no         -        -        /srv/mysite/deploy/systemd/mysite-dbcheck.timer
 
-Nothing is installed yet, so the state columns show ``-``. This command works
-anywhere, including a development machine without systemd, so it is a good
-first check that the templates are found.
+Nothing is installed yet, so the state columns show ``-``. This command never
+escalates and works anywhere, including a development machine without
+systemd, so it is a good first check that the templates are found.
 
 Render the units
 ================
@@ -204,6 +261,8 @@ read the output:
 
     [Service]
     Type=simple
+    User=mysite
+    Group=mysite
     WorkingDirectory=/srv/mysite
     Environment=DJANGO_SETTINGS_MODULE=mysite.settings
     ExecStart=/srv/mysite/.venv/bin/gunicorn mysite.asgi:application \
@@ -214,20 +273,21 @@ read the output:
     Restart=on-failure
 
     [Install]
-    WantedBy=default.target
+    WantedBy=multi-user.target
 
 Every placeholder has been replaced with a value from this host: the
 environment path, the settings module, the worker count. That is the point of
 rendering at deploy time. The unit file reflects the machine it will run on, and
 the template in version control stays free of host details.
 
-``render`` never talks to systemd, so it is safe to run as often as you like.
-The scratch copy can be deleted; ``install`` renders its own.
+``render`` never talks to systemd and never escalates, so it is safe to run as
+often as you like. The scratch copy can be deleted; ``install`` renders its own.
 
 Install, enable and start
-=========================
+==========================
 
-Install the units into the user unit directory and enable them:
+Install the units and enable them, as the ``deploy`` user with
+:setting:`SYSTEMD_ESCALATE` set as above:
 
 .. code-block:: bash
 
@@ -235,14 +295,17 @@ Install the units into the user unit directory and enable them:
 
 .. code-block:: text
 
-    /home/deploy/.config/systemd/user/mysite-web.service
-    /home/deploy/.config/systemd/user/mysite-dbcheck.service
-    /home/deploy/.config/systemd/user/mysite-dbcheck.timer
+    /etc/systemd/system/mysite-web.service
+    /etc/systemd/system/mysite-dbcheck.service
+    /etc/systemd/system/mysite-dbcheck.timer
 
-``install`` renders the templates, copies each unit into
-``~/.config/systemd/user``, tells the user manager to reload its unit files, and
-enables the units. Enabling makes them start with the user manager at boot. It
-does not start them now, so do that:
+``install`` renders the templates, then, since ``deploy`` is not root, runs
+``sudo -n install`` to copy each one into ``/etc/systemd/system``, ``sudo -n
+systemctl daemon-reload`` to make the system manager see them, and ``sudo -n
+systemctl enable`` for each. The ``sudo -n`` prefix is transparent: nothing
+about running the command changes except that it now succeeds without a
+password prompt, because of the sudoers rule from earlier. Enabling makes the
+units start at boot. It does not start them now, so do that:
 
 .. code-block:: bash
 
@@ -283,13 +346,21 @@ The site is up on port 8000:
     curl -I http://127.0.0.1:8000/
 
 Everything else about the running units is ordinary systemd. To see the
-check's output after its first run, or to watch the web service's logs:
+check's output after its first run, list the running timers, or watch the web
+service's logs:
 
 .. code-block:: bash
 
-    systemctl --user list-timers
-    journalctl --user -u mysite-dbcheck.service
-    journalctl --user -u mysite-web.service -f
+    systemctl list-timers
+    journalctl -u mysite-dbcheck.service
+    journalctl -u mysite-web.service -f
+
+Reading system logs as ``deploy`` (rather than as root) needs membership in
+the ``systemd-journal`` group, which takes a new login to pick up:
+
+.. code-block:: bash
+
+    sudo usermod -aG systemd-journal deploy
 
 Deploy a change
 ===============
@@ -369,6 +440,6 @@ To take the site down and remove its units:
     removed mysite-dbcheck.timer
 
 ``uninstall`` stops and disables each installed unit, deletes the unit files and
-reloads the user manager. It is safe to run when nothing is installed. The
-templates in ``deploy/systemd/`` are untouched, so ``install`` brings everything
-back.
+reloads the system manager, all through the same ``sudo -n`` prefix. It is safe
+to run when nothing is installed. The templates in ``deploy/systemd/`` are
+untouched, so ``install`` brings everything back.

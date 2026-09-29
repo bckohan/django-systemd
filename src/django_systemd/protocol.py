@@ -1,14 +1,20 @@
 """
-A thin, mockable seam over ``systemctl --user`` and the user unit directory.
+A thin, mockable seam over ``systemctl`` and the unit directory.
 
-django-systemd assumes every unit it manages runs as the deploying user, never as
-root. There is no system scope and no privilege escalation. Anything that needs
-root belongs in your provisioning tooling, not here.
+The seam works in either :class:`~django_systemd.defines.SystemdScope`. In the
+system scope units live in ``/etc/systemd/system`` and changing them needs
+privileges; in the user scope they live in the user's unit directory and need
+none. Privileges are never detected: they come from running as root, from an
+explicitly configured escalation prefix, or from polkit rules. Read-only queries
+are never escalated.
 
-Talking to the user manager from a non-login session (for example over SSH as a
-deploy user) requires lingering to be enabled for that user with
+In the user scope, talking to the manager from a non-login session (for example
+over SSH as a deploy user) requires lingering to be enabled for that user with
 ``loginctl enable-linger``, or ``XDG_RUNTIME_DIR`` to be set. Failures show up as
 ``Failed to connect to bus`` in the raised CalledProcessError.
+
+The escalation seam (:attr:`SubprocessSystemdCtl.escalates`) uses ``os.geteuid``
+and is therefore POSIX-only.
 """
 
 from __future__ import annotations
@@ -23,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from .defines import SystemdScope
+
 
 def user_unit_dir() -> Path:
     """
@@ -34,6 +42,11 @@ def user_unit_dir() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
     return root / "systemd" / "user"
+
+
+def system_unit_dir() -> Path:
+    """The directory for locally administered system units."""
+    return Path("/etc/systemd/system")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,15 +68,17 @@ class SystemdCtl(Protocol):
     """
 
     unit_dir: Path
+    scope: SystemdScope
 
     @property
     def available(self) -> bool:
         """
-        True if a systemctl binary is on PATH. This does not check that the user
+        True if a systemctl binary is on PATH. This does not check that the
         manager is reachable; callers must check it before calling any other
         systemctl-backed method, which raise FileNotFoundError when systemctl is
-        absent. ``is_installed``, ``install_unit`` and ``uninstall_unit`` are
-        filesystem-only and do not require this check.
+        absent. ``is_installed``, ``install_unit``, ``uninstall_unit`` and
+        ``linked_source`` are filesystem-only and do not require this check;
+        ``link_unit`` calls ``systemctl`` and does.
         """
         ...
 
@@ -94,6 +109,9 @@ class SystemdCtl(Protocol):
         :param name: Install under this file name instead of ``source.name``.
         :param mode: File mode to apply to the installed unit.
         :return: The path of the installed unit file.
+        :raises subprocess.CalledProcessError: if escalated and the escalated
+            command fails.
+        :raises OSError: if not escalated and the file operation fails.
         """
         ...
 
@@ -102,15 +120,57 @@ class SystemdCtl(Protocol):
         Remove the unit file with this name from :attr:`unit_dir`.
 
         :return: True if a file was removed, False if there was nothing to remove.
+        :raises subprocess.CalledProcessError: if escalated and the escalated
+            command fails.
+        :raises OSError: if not escalated and the file operation fails.
         """
+        ...
+
+    def link_unit(self, source: Path) -> Path:
+        """
+        Link ``source`` into :attr:`unit_dir` with ``systemctl link --force``.
+
+        The file stays where it is; systemd reads it through the symlink. This
+        is the install method that works with polkit alone, because it never
+        writes to the unit directory itself. Re-linking an already linked unit
+        is fine.
+
+        ``source`` must be absolute (a relative path is resolved against the
+        current working directory, which is rarely what the caller intends),
+        outside systemd's unit search path (linking a file that is already a
+        search path member is rejected by systemd), and on a file system that
+        is mounted at boot: systemd reads it as root during early boot, so a
+        separately mounted ``/home`` is not suitable. With a custom
+        :attr:`unit_dir` the returned path is only where the real scope's
+        manager would resolve the link if ``unit_dir`` happens to match that
+        scope's actual unit directory; systemd itself always places the link
+        according to its own scope, not the caller's ``unit_dir``.
+
+        :return: The path of the symlink in :attr:`unit_dir`.
+        :raises subprocess.CalledProcessError: if ``systemctl link`` fails, for
+            example because a regular file already occupies the destination.
+        """
+        ...
+
+    def linked_source(self, name: str) -> Path | None:
+        """The file a linked unit points at, or ``None`` if not a symlink."""
         ...
 
 
 class SubprocessSystemdCtl:
     """
-    :class:`SystemdCtl` implemented by shelling out to ``systemctl --user``.
+    :class:`SystemdCtl` implemented by shelling out to ``systemctl``.
 
-    :param unit_dir: Where to install unit files. Defaults to :func:`user_unit_dir`.
+    Works in either :class:`~django_systemd.defines.SystemdScope`.
+
+    :param scope: The scope to manage units in. Defaults to
+        :attr:`~django_systemd.defines.SystemdScope.SYSTEM`.
+    :param unit_dir: Where to install unit files. Defaults to
+        :func:`system_unit_dir` in the system scope and :func:`user_unit_dir` in
+        the user scope.
+    :param escalate: A privilege escalation prefix, e.g. ``("sudo", "-n")``. Only
+        applied to privileged calls in the system scope, and never when already
+        root. Read-only queries are never escalated.
     """
 
     # systemctl is-enabled prints one of many states; these all mean "will start".
@@ -120,20 +180,42 @@ class SubprocessSystemdCtl:
     # is-active states that mean the unit is up or coming up.
     _ACTIVE_STATES = frozenset({"active", "activating", "reloading"})
 
-    def __init__(self, unit_dir: Path | None = None) -> None:
-        self.unit_dir = unit_dir or user_unit_dir()
+    def __init__(
+        self,
+        scope: SystemdScope = SystemdScope.SYSTEM,
+        *,
+        unit_dir: Path | None = None,
+        escalate: Sequence[str] = (),
+    ) -> None:
+        self.scope = scope
+        self.escalate = tuple(escalate)
+        self.unit_dir = unit_dir or (
+            system_unit_dir() if scope is SystemdScope.SYSTEM else user_unit_dir()
+        )
 
     @property
     def available(self) -> bool:
         return shutil.which("systemctl") is not None
 
-    def _systemctl(
-        self, *args: str, units: Sequence[str] = (), check: bool = True
-    ) -> CommandResult:
-        # Unit names follow "--" so systemctl never parses one as an option.
-        cmd = ["systemctl", "--user", *args, *(("--", *units) if units else ())]
-        # An argument list with no shell, a fixed executable and fixed
-        # subcommands; unit names are positional after "--".
+    @property
+    def escalates(self) -> bool:
+        """
+        True if privileged calls are prefixed: a prefix is configured, the scope
+        is the system one, and the effective user is not root.
+        """
+        return (
+            bool(self.escalate)
+            and self.scope is SystemdScope.SYSTEM
+            and os.geteuid() != 0
+        )
+
+    def _run(self, cmd: list[str], *, check: bool = True) -> CommandResult:
+        """Run ``cmd`` (an argument list, never a shell) and wrap the result."""
+        # An argument list with no shell. The optional leading prefix is operator
+        # configuration from settings (SYSTEMD_ESCALATE), never user input; the
+        # executable that follows it is always one of "systemctl", "install" or
+        # "rm". After "--" come bare unit file names, or, for "link", an absolute
+        # path chosen by the operator.
         result = subprocess.run(  # nosec B603
             cmd, capture_output=True, text=True, check=False
         )
@@ -148,6 +230,33 @@ class SubprocessSystemdCtl:
             stderr=result.stderr,
         )
 
+    def _privileged(self, cmd: list[str], *, check: bool = True) -> CommandResult:
+        """Run ``cmd`` under the escalation prefix when :attr:`escalates`."""
+        return self._run([*self.escalate, *cmd] if self.escalates else cmd, check=check)
+
+    def _systemctl_argv(self, *args: str, units: Sequence[str] = ()) -> list[str]:
+        # --no-ask-password: fail rather than prompt when authorization is missing.
+        # Unit names follow "--" so systemctl never parses one as an option.
+        return [
+            "systemctl",
+            *(["--user"] if self.scope is SystemdScope.USER else []),
+            "--no-ask-password",
+            *args,
+            *(("--", *units) if units else ()),
+        ]
+
+    def _systemctl(
+        self, *args: str, units: Sequence[str] = (), check: bool = True
+    ) -> CommandResult:
+        """A privileged systemctl call: changes manager state, so may be escalated."""
+        return self._privileged(self._systemctl_argv(*args, units=units), check=check)
+
+    def _query(
+        self, *args: str, units: Sequence[str] = (), check: bool = False
+    ) -> CommandResult:
+        """A read-only systemctl call. Never escalated."""
+        return self._run(self._systemctl_argv(*args, units=units), check=check)
+
     def daemon_reload(self) -> None:
         self._systemctl("daemon-reload")
 
@@ -161,7 +270,7 @@ class SubprocessSystemdCtl:
         self._systemctl("stop", units=[unit])
 
     def can_reload(self, unit: str) -> bool:
-        result = self._systemctl(
+        result = self._query(
             "show", "--property=CanReload", "--value", units=[unit], check=False
         )
         return result.stdout.strip() == "yes"
@@ -173,7 +282,7 @@ class SubprocessSystemdCtl:
         self._systemctl("disable", units=[unit])
 
     def is_active(self, unit: str) -> bool:
-        result = self._systemctl("is-active", units=[unit], check=False)
+        result = self._query("is-active", units=[unit], check=False)
         if result.returncode != 0 and not result.stdout:
             raise subprocess.CalledProcessError(
                 result.returncode, result.argv, result.stdout, result.stderr
@@ -181,7 +290,7 @@ class SubprocessSystemdCtl:
         return result.stdout.strip() in self._ACTIVE_STATES
 
     def is_enabled(self, unit: str) -> bool:
-        result = self._systemctl("is-enabled", units=[unit], check=False)
+        result = self._query("is-enabled", units=[unit], check=False)
         if result.returncode != 0 and not result.stdout:
             raise subprocess.CalledProcessError(
                 result.returncode, result.argv, result.stdout, result.stderr
@@ -200,6 +309,15 @@ class SubprocessSystemdCtl:
         self, source: Path, *, name: str | None = None, mode: int = 0o644
     ) -> Path:
         destination = self._unit_path(name if name is not None else source.name)
+        if self.escalates:
+            # install(1) creates or replaces the file with the mode in one step and
+            # is easy to allow in a sudoers rule. Unlike the Python path below,
+            # this replace is not atomic; only a concurrent daemon-reload could
+            # observe the file mid-write.
+            self._privileged(
+                ["install", "-m", f"{mode:o}", "--", str(source), str(destination)]
+            )
+            return destination
         self.unit_dir.mkdir(parents=True, exist_ok=True)
         staged = destination.with_name(destination.name + ".tmp")
         try:
@@ -213,7 +331,25 @@ class SubprocessSystemdCtl:
 
     def uninstall_unit(self, name: str) -> bool:
         destination = self._unit_path(name)
-        if destination.is_file() or destination.is_symlink():
+        # The existence check only needs read/search access to the unit directory;
+        # rm -f tolerates a file that vanished in between, so the race is benign.
+        if not (destination.is_file() or destination.is_symlink()):
+            return False
+        if self.escalates:
+            self._privileged(["rm", "-f", "--", str(destination)])
+        else:
             destination.unlink()
-            return True
-        return False
+        return True
+
+    def link_unit(self, source: Path) -> Path:
+        source = source.absolute()
+        destination = self._unit_path(source.name)
+        self._systemctl("link", "--force", units=[str(source)])
+        return destination
+
+    def linked_source(self, name: str) -> Path | None:
+        path = self._unit_path(name)
+        if path.is_symlink():
+            target = Path(os.readlink(path))
+            return target if target.is_absolute() else path.parent / target
+        return None

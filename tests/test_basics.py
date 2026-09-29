@@ -7,18 +7,25 @@ from pathlib import Path
 
 import pytest
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.template.exceptions import TemplateDoesNotExist
 from django.test import override_settings
 
 from django_systemd.config import (
     SERVICE_UNIT_REGEX,
     ServiceUnit,
+    escalation,
+    install_method,
+    link_dir,
     project_units,
     render_engine,
+    scope,
     template_engine_config,
 )
 from django_systemd.defines import (
+    InstallMethod,
     SystemdRestartType,
+    SystemdScope,
     SystemdStartupType,
     SystemdUnitType,
 )
@@ -105,6 +112,13 @@ class TestSystemdRestartType:
     def test_str(self):
         assert str(SystemdRestartType.ON_FAILURE) == "on-failure"
         assert str(SystemdRestartType.ALWAYS) == "always"
+
+
+class TestSystemdScope:
+    def test_values(self):
+        assert SystemdScope("system") is SystemdScope.SYSTEM
+        assert SystemdScope("user") is SystemdScope.USER
+        assert str(SystemdScope.SYSTEM) == "system"
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +335,73 @@ class TestTemplateEngineConfig:
 
 
 @pytest.mark.django_db
+class TestScopeSetting:
+    def test_defaults_to_system(self):
+        assert scope() is SystemdScope.SYSTEM
+
+    def test_setting_as_string(self):
+        with override_settings(SYSTEMD_SCOPE="user"):
+            assert scope() is SystemdScope.USER
+
+    def test_setting_as_member(self):
+        with override_settings(SYSTEMD_SCOPE=SystemdScope.USER):
+            assert scope() is SystemdScope.USER
+
+    def test_invalid_setting(self):
+        with override_settings(SYSTEMD_SCOPE="root"):
+            with pytest.raises(ImproperlyConfigured):
+                scope()
+
+    def test_scope_in_template_context(self):
+        assert template_engine_config()["context"]["scope"] == "system"
+        with override_settings(SYSTEMD_SCOPE="user"):
+            template_engine_config.cache_clear()
+            assert template_engine_config()["context"]["scope"] == "user"
+
+    def test_scope_in_template_context_cannot_be_overridden(self, caplog):
+        with override_settings(SYSTEMD_TEMPLATE_CONTEXT={"scope": "user"}):
+            template_engine_config.cache_clear()
+            with caplog.at_level("WARNING", logger="django_systemd.config"):
+                cfg = template_engine_config()
+        assert cfg["context"]["scope"] == "system"
+        assert any(
+            "Ignoring scope=" in rec.message
+            and "SYSTEMD_TEMPLATE_CONTEXT" in rec.message
+            for rec in caplog.records
+        )
+
+
+@pytest.mark.django_db
+class TestEscalationSetting:
+    def test_default_is_empty(self):
+        assert escalation() == ()
+
+    def test_string_is_split(self):
+        with override_settings(SYSTEMD_ESCALATE="sudo -n"):
+            assert escalation() == ("sudo", "-n")
+
+    def test_sequence_passes_through(self):
+        with override_settings(SYSTEMD_ESCALATE=["doas"]):
+            assert escalation() == ("doas",)
+
+    def test_none_and_empty_mean_no_escalation(self):
+        with override_settings(SYSTEMD_ESCALATE=None):
+            assert escalation() == ()
+        with override_settings(SYSTEMD_ESCALATE=""):
+            assert escalation() == ()
+
+    def test_non_string_non_sequence_raises(self):
+        with override_settings(SYSTEMD_ESCALATE=True):
+            with pytest.raises(ImproperlyConfigured):
+                escalation()
+
+    def test_unparseable_string_raises(self):
+        with override_settings(SYSTEMD_ESCALATE="sudo 'x"):
+            with pytest.raises(ImproperlyConfigured):
+                escalation()
+
+
+@pytest.mark.django_db
 class TestRenderEngine:
     def test_returns_engine(self):
         from render_static.engine import StaticTemplateEngine
@@ -403,3 +484,27 @@ class TestSignals:
             unit_installed.disconnect(handler)
 
         assert received == ["web.service"]
+
+
+@pytest.mark.django_db
+class TestInstallMethodSettings:
+    def test_defaults(self):
+        assert install_method() is InstallMethod.COPY
+        assert link_dir() is None
+
+    def test_link_settings(self, tmp_path):
+        with override_settings(
+            SYSTEMD_INSTALL_METHOD="link", SYSTEMD_LINK_DIR=str(tmp_path)
+        ):
+            assert install_method() is InstallMethod.LINK
+            assert link_dir() == tmp_path
+
+    def test_invalid_setting_raises(self):
+        with override_settings(SYSTEMD_INSTALL_METHOD="symlink"):
+            with pytest.raises(ImproperlyConfigured):
+                install_method()
+
+    def test_relative_link_dir_raises(self):
+        with override_settings(SYSTEMD_LINK_DIR="relative/units"):
+            with pytest.raises(ImproperlyConfigured):
+                link_dir()

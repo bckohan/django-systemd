@@ -1,6 +1,6 @@
 """
-Tests for the user-scope systemctl seam. subprocess.run is always mocked, so these
-tests run on machines without systemd.
+Tests for the systemctl seam in both scopes. subprocess.run is always mocked, so
+these tests run on machines without systemd.
 """
 
 from __future__ import annotations
@@ -11,16 +11,24 @@ from unittest import mock
 
 import pytest
 
+from django_systemd.defines import SystemdScope
 from django_systemd.protocol import (
     CommandResult,
     SubprocessSystemdCtl,
     SystemdCtl,
+    system_unit_dir,
     user_unit_dir,
 )
 
 
 def completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> mock.Mock:
     return mock.Mock(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def argv(*rest: str, scope: SystemdScope) -> list[str]:
+    """The exact systemctl argv the seam must build for ``rest`` in ``scope``."""
+    flags = ["--user"] if scope is SystemdScope.USER else []
+    return ["systemctl", *flags, "--no-ask-password", *rest]
 
 
 class TestUserUnitDir:
@@ -40,16 +48,178 @@ class TestCommandResult:
             result.returncode = 1  # type: ignore[misc]
 
 
+class TestScope:
+    def test_defaults_to_system_scope(self):
+        ctl = SubprocessSystemdCtl()
+        assert ctl.scope is SystemdScope.SYSTEM
+        assert ctl.unit_dir == system_unit_dir() == Path("/etc/systemd/system")
+
+    def test_user_scope_uses_user_unit_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        ctl = SubprocessSystemdCtl(scope=SystemdScope.USER)
+        assert ctl.unit_dir == tmp_path / "systemd" / "user"
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_system_scope_has_no_user_flag(self, run, tmp_path):
+        run.return_value = completed()
+        SubprocessSystemdCtl(unit_dir=tmp_path).daemon_reload()
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.SYSTEM)
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_user_scope_has_user_flag(self, run, tmp_path):
+        run.return_value = completed()
+        SubprocessSystemdCtl(scope=SystemdScope.USER, unit_dir=tmp_path).daemon_reload()
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.USER)
+
+
+class TestEscalation:
+    def _ctl(self, tmp_path, **kwargs):
+        return SubprocessSystemdCtl(
+            scope=SystemdScope.SYSTEM,
+            unit_dir=tmp_path / "units",
+            escalate=("sudo", "-n"),
+            **kwargs,
+        )
+
+    @pytest.mark.parametrize(
+        "method,args,rest",
+        [
+            ("daemon_reload", (), ["daemon-reload"]),
+            (
+                "restart",
+                ("a.service", "b.timer"),
+                ["restart", "--", "a.service", "b.timer"],
+            ),
+            ("reload", ("a.service",), ["reload", "--", "a.service"]),
+            ("stop", ("a.service",), ["stop", "--", "a.service"]),
+            ("enable", ("a.service",), ["enable", "--", "a.service"]),
+            ("disable", ("a.service",), ["disable", "--", "a.service"]),
+        ],
+    )
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_privileged_calls_are_prefixed(
+        self, run, _euid, method, args, rest, tmp_path
+    ):
+        run.return_value = completed()
+        getattr(self._ctl(tmp_path), method)(*args)
+        assert run.call_args[0][0] == [
+            "sudo",
+            "-n",
+            *argv(*rest, scope=SystemdScope.SYSTEM),
+        ]
+
+    @pytest.mark.parametrize(
+        "method,rest",
+        [
+            ("is_active", ["is-active", "--", "a.service"]),
+            ("is_enabled", ["is-enabled", "--", "a.service"]),
+            (
+                "can_reload",
+                ["show", "--property=CanReload", "--value", "--", "a.service"],
+            ),
+        ],
+    )
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_queries_are_never_prefixed(self, run, _euid, method, rest, tmp_path):
+        run.return_value = completed(0, "active\n")
+        getattr(self._ctl(tmp_path), method)("a.service")
+        assert run.call_args[0][0] == argv(*rest, scope=SystemdScope.SYSTEM)
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=0)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_root_is_not_prefixed(self, run, _euid, tmp_path):
+        run.return_value = completed()
+        self._ctl(tmp_path).daemon_reload()
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.SYSTEM)
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_user_scope_is_not_prefixed(self, run, _euid, tmp_path):
+        run.return_value = completed()
+        SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path, escalate=("sudo", "-n")
+        ).daemon_reload()
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.USER)
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_install_goes_through_install_binary(self, run, _euid, tmp_path):
+        run.return_value = completed()
+        source = tmp_path / "a.service"
+        source.write_text("x")
+        ctl = self._ctl(tmp_path)
+        dest = ctl.install_unit(source)
+        assert dest == ctl.unit_dir / "a.service"
+        assert run.call_args[0][0] == [
+            "sudo",
+            "-n",
+            "install",
+            "-m",
+            "644",
+            "--",
+            str(source),
+            str(dest),
+        ]
+        assert not dest.exists()  # nothing was written by Python itself
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_install_failure_raises_called_process_error(self, run, _euid, tmp_path):
+        run.return_value = completed(1, "", "sudo: a password is required")
+        source = tmp_path / "a.service"
+        source.write_text("x")
+        with pytest.raises(subprocess.CalledProcessError) as exc:
+            self._ctl(tmp_path).install_unit(source)
+        assert "password is required" in exc.value.stderr
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_uninstall_goes_through_rm(self, run, _euid, tmp_path):
+        run.return_value = completed()
+        ctl = self._ctl(tmp_path)
+        ctl.unit_dir.mkdir(parents=True)
+        (ctl.unit_dir / "a.service").write_text("x")
+        assert ctl.uninstall_unit("a.service") is True
+        assert run.call_args[0][0] == [
+            "sudo",
+            "-n",
+            "rm",
+            "-f",
+            "--",
+            str(ctl.unit_dir / "a.service"),
+        ]
+        assert ctl.uninstall_unit("missing.service") is False
+        assert run.call_count == 1
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=0)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_root_uses_python_file_operations(self, run, _euid, tmp_path):
+        source = tmp_path / "a.service"
+        source.write_text("x")
+        ctl = self._ctl(tmp_path)
+        dest = ctl.install_unit(source)
+        assert dest.read_text() == "x"
+        assert ctl.uninstall_unit("a.service") is True
+        run.assert_not_called()
+
+
 class TestSubprocessSystemdCtl:
     def _ctl(self, tmp_path: Path) -> SubprocessSystemdCtl:
-        return SubprocessSystemdCtl(unit_dir=tmp_path / "units")
+        return SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "units"
+        )
 
     def test_satisfies_protocol(self, tmp_path):
         assert isinstance(self._ctl(tmp_path), SystemdCtl)
 
     def test_default_unit_dir(self, monkeypatch, tmp_path):
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-        assert SubprocessSystemdCtl().unit_dir == tmp_path / "systemd" / "user"
+        assert (
+            SubprocessSystemdCtl(scope=SystemdScope.USER).unit_dir
+            == tmp_path / "systemd" / "user"
+        )
 
     @mock.patch("django_systemd.protocol.shutil.which", return_value="/bin/systemctl")
     def test_available(self, _which, tmp_path):
@@ -60,11 +230,11 @@ class TestSubprocessSystemdCtl:
         assert self._ctl(tmp_path).available is False
 
     @mock.patch("django_systemd.protocol.subprocess.run")
-    def test_always_user_scope(self, run, tmp_path):
+    def test_daemon_reload_argv(self, run, tmp_path):
         run.return_value = completed()
         self._ctl(tmp_path).daemon_reload()
         run.assert_called_once()
-        assert run.call_args[0][0] == ["systemctl", "--user", "daemon-reload"]
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.USER)
         assert run.call_args[1]["check"] is False
 
     @mock.patch("django_systemd.protocol.subprocess.run")
@@ -98,13 +268,9 @@ class TestSubprocessSystemdCtl:
     def test_unit_verbs(self, run, method, verb, args, expected_units, tmp_path):
         run.return_value = completed()
         getattr(self._ctl(tmp_path), method)(*args)
-        assert run.call_args[0][0] == [
-            "systemctl",
-            "--user",
-            verb,
-            "--",
-            *expected_units,
-        ]
+        assert run.call_args[0][0] == argv(
+            verb, "--", *expected_units, scope=SystemdScope.USER
+        )
 
     @pytest.mark.parametrize(
         "stdout,expected",
@@ -119,13 +285,9 @@ class TestSubprocessSystemdCtl:
     def test_is_active(self, run, stdout, expected, tmp_path):
         run.return_value = completed(0 if expected else 3, stdout)
         assert self._ctl(tmp_path).is_active("web.service") is expected
-        assert run.call_args[0][0] == [
-            "systemctl",
-            "--user",
-            "is-active",
-            "--",
-            "web.service",
-        ]
+        assert run.call_args[0][0] == argv(
+            "is-active", "--", "web.service", scope=SystemdScope.USER
+        )
 
     @mock.patch("django_systemd.protocol.subprocess.run")
     def test_unit_names_are_never_parsed_as_options(self, run, tmp_path):
@@ -170,15 +332,14 @@ class TestSubprocessSystemdCtl:
     def test_can_reload(self, run, stdout, expected, tmp_path):
         run.return_value = completed(0, stdout)
         assert self._ctl(tmp_path).can_reload("web.service") is expected
-        assert run.call_args[0][0] == [
-            "systemctl",
-            "--user",
+        assert run.call_args[0][0] == argv(
             "show",
             "--property=CanReload",
             "--value",
             "--",
             "web.service",
-        ]
+            scope=SystemdScope.USER,
+        )
 
     def test_install_unit_copies(self, tmp_path):
         source = tmp_path / "web.service"
@@ -271,3 +432,73 @@ class TestSubprocessSystemdCtl:
     def test_missing_systemctl_raises_file_not_found(self, run, tmp_path):
         with pytest.raises(FileNotFoundError):
             self._ctl(tmp_path).daemon_reload()
+
+
+class TestLink:
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_unit(self, run, tmp_path):
+        run.return_value = completed()
+        source = tmp_path / "units" / "a.service"
+        source.parent.mkdir()
+        source.write_text("x")
+        ctl = SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "unitdir"
+        )
+        dest = ctl.link_unit(source)
+        assert dest == tmp_path / "unitdir" / "a.service"
+        assert run.call_args[0][0] == argv(
+            "link", "--force", "--", str(source), scope=SystemdScope.USER
+        )
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_unit_makes_relative_source_absolute(self, run, tmp_path, monkeypatch):
+        run.return_value = completed()
+        monkeypatch.chdir(tmp_path)
+        Path("a.service").write_text("x")
+        SubprocessSystemdCtl(scope=SystemdScope.USER, unit_dir=tmp_path).link_unit(
+            Path("a.service")
+        )
+        assert run.call_args[0][0][-1] == str(tmp_path / "a.service")
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_is_privileged(self, run, _euid, tmp_path):
+        run.return_value = completed()
+        source = tmp_path / "a.service"
+        source.write_text("x")
+        SubprocessSystemdCtl(unit_dir=tmp_path, escalate=("sudo", "-n")).link_unit(
+            source
+        )
+        assert run.call_args[0][0][:2] == ["sudo", "-n"]
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_unit_failure_raises(self, run, tmp_path):
+        run.return_value = completed(1, "", "Failed to link unit: File exists")
+        source = tmp_path / "a.service"
+        source.write_text("x")
+        ctl = SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "unitdir"
+        )
+        with pytest.raises(subprocess.CalledProcessError) as exc:
+            ctl.link_unit(source)
+        assert "File exists" in exc.value.stderr
+
+    def test_linked_source(self, tmp_path):
+        ctl = SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "unitdir"
+        )
+        ctl.unit_dir.mkdir()
+        target = tmp_path / "a.service"
+        target.write_text("x")
+        (ctl.unit_dir / "a.service").symlink_to(target)
+        (ctl.unit_dir / "b.service").write_text("y")
+        (tmp_path / "c.service").write_text("z")
+        (ctl.unit_dir / "c.service").symlink_to("../c.service")
+        assert ctl.linked_source("a.service") == target
+        assert ctl.linked_source("b.service") is None
+        assert ctl.linked_source("missing.service") is None
+        assert (
+            ctl.linked_source("c.service").resolve()
+            == (ctl.unit_dir / ".." / "c.service").resolve()
+        )
+        assert ctl.is_installed("a.service") is True
