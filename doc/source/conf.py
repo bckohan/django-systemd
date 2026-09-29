@@ -134,6 +134,14 @@ def pypi_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
     return [node], []
 
 
+def rtd_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
+    from docutils import nodes
+
+    url = f"https://{text}.readthedocs.io"
+    node = nodes.reference(rawtext, text, refuri=url, **options)
+    return [node], []
+
+
 def setup(app):
     from docutils.parsers.rst import roles
     # Register a sphinx.ext.autodoc.between listener to ignore everything
@@ -144,6 +152,7 @@ def setup(app):
     )
     # app.connect('html-page-context', add_page_class)
     roles.register_local_role("pypi", pypi_role)
+    roles.register_local_role("rtd", rtd_role)
     app.add_crossref_type(directivename="django-admin", rolename="django-admin")
     # https://sphinxcontrib-typer.readthedocs.io/en/latest/howto.html#build-to-multiple-formats
     if Path(app.doctreedir).exists():
