@@ -15,6 +15,7 @@ from django.core.management import CommandError, call_command
 from django.test import override_settings
 
 from django_systemd.config import ServiceUnit, render_engine, template_engine_config
+from django_systemd.defines import SystemdScope
 from django_systemd.management.commands.systemd import Command, parse_context
 from django_systemd.protocol import SystemdCtl
 from django_systemd.signals import unit_installed
@@ -29,9 +30,11 @@ class FakeCtl:
         *,
         available: bool = True,
         reloadable: set[str] | None = None,
+        scope: SystemdScope = SystemdScope.SYSTEM,
     ) -> None:
         self.unit_dir = unit_dir
         self.available = available
+        self.scope = scope
         self.reloadable = reloadable or set()
         self.calls: list[tuple[str, str]] = []
         self.active: set[str] = set()

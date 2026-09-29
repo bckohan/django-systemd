@@ -1,12 +1,15 @@
 """
-A thin, mockable seam over ``systemctl --user`` and the user unit directory.
+A thin, mockable seam over ``systemctl`` and the unit directory.
 
-django-systemd assumes every unit it manages runs as the deploying user, never as
-root. There is no system scope and no privilege escalation. Anything that needs
-root belongs in your provisioning tooling, not here.
+The seam works in either :class:`~django_systemd.defines.SystemdScope`. In the
+system scope units live in ``/etc/systemd/system`` and changing them needs
+privileges; in the user scope they live in the user's unit directory and need
+none. Privileges are never detected: they come from running as root, from an
+explicitly configured escalation prefix, or from polkit rules. Read-only queries
+are never escalated.
 
-Talking to the user manager from a non-login session (for example over SSH as a
-deploy user) requires lingering to be enabled for that user with
+In the user scope, talking to the manager from a non-login session (for example
+over SSH as a deploy user) requires lingering to be enabled for that user with
 ``loginctl enable-linger``, or ``XDG_RUNTIME_DIR`` to be set. Failures show up as
 ``Failed to connect to bus`` in the raised CalledProcessError.
 """
@@ -23,6 +26,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from .defines import SystemdScope
+
 
 def user_unit_dir() -> Path:
     """
@@ -34,6 +39,11 @@ def user_unit_dir() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
     return root / "systemd" / "user"
+
+
+def system_unit_dir() -> Path:
+    """The directory for locally administered system units."""
+    return Path("/etc/systemd/system")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +65,7 @@ class SystemdCtl(Protocol):
     """
 
     unit_dir: Path
+    scope: SystemdScope
 
     @property
     def available(self) -> bool:
@@ -108,9 +119,15 @@ class SystemdCtl(Protocol):
 
 class SubprocessSystemdCtl:
     """
-    :class:`SystemdCtl` implemented by shelling out to ``systemctl --user``.
+    :class:`SystemdCtl` implemented by shelling out to ``systemctl``.
 
-    :param unit_dir: Where to install unit files. Defaults to :func:`user_unit_dir`.
+    Works in either :class:`~django_systemd.defines.SystemdScope`.
+
+    :param scope: The scope to manage units in. Defaults to
+        :attr:`~django_systemd.defines.SystemdScope.SYSTEM`.
+    :param unit_dir: Where to install unit files. Defaults to
+        :func:`system_unit_dir` in the system scope and :func:`user_unit_dir` in
+        the user scope.
     """
 
     # systemctl is-enabled prints one of many states; these all mean "will start".
@@ -120,8 +137,16 @@ class SubprocessSystemdCtl:
     # is-active states that mean the unit is up or coming up.
     _ACTIVE_STATES = frozenset({"active", "activating", "reloading"})
 
-    def __init__(self, unit_dir: Path | None = None) -> None:
-        self.unit_dir = unit_dir or user_unit_dir()
+    def __init__(
+        self,
+        scope: SystemdScope = SystemdScope.SYSTEM,
+        *,
+        unit_dir: Path | None = None,
+    ) -> None:
+        self.scope = scope
+        self.unit_dir = unit_dir or (
+            system_unit_dir() if scope is SystemdScope.SYSTEM else user_unit_dir()
+        )
 
     @property
     def available(self) -> bool:
@@ -130,8 +155,15 @@ class SubprocessSystemdCtl:
     def _systemctl(
         self, *args: str, units: Sequence[str] = (), check: bool = True
     ) -> CommandResult:
+        # --no-ask-password: fail rather than prompt when authorization is missing.
         # Unit names follow "--" so systemctl never parses one as an option.
-        cmd = ["systemctl", "--user", *args, *(("--", *units) if units else ())]
+        cmd = [
+            "systemctl",
+            *(["--user"] if self.scope is SystemdScope.USER else []),
+            "--no-ask-password",
+            *args,
+            *(("--", *units) if units else ()),
+        ]
         # An argument list with no shell, a fixed executable and fixed
         # subcommands; unit names are positional after "--".
         result = subprocess.run(  # nosec B603

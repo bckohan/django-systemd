@@ -155,3 +155,21 @@ class SystemdRestartType(StrEnum):
 
     ALWAYS = "always"
     """Restarts regardless of exit status, signal termination, or timeout."""
+
+
+class SystemdScope(StrEnum):
+    """Which systemd manager owns the project's units."""
+
+    SYSTEM = "system"
+    """
+    The system manager. Units live in ``/etc/systemd/system``, start at boot, and
+    run as the ``User=`` they name (root if they name none). Managing them needs
+    root, an escalation prefix such as ``sudo -n``, or polkit rules.
+    """
+
+    USER = "user"
+    """
+    The invoking user's manager (``systemctl --user``). Units live in
+    ``~/.config/systemd/user``, run as that user, and need no privileges, but the
+    manager only runs while the user has a session or lingering is enabled.
+    """

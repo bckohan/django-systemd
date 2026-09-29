@@ -10,7 +10,7 @@ from pathlib import Path
 from render_static.context import resolve_context
 from render_static.engine import StaticTemplateEngine
 
-from .defines import SystemdUnitType
+from .defines import SystemdScope, SystemdUnitType
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,20 @@ class ServiceUnit:
         raise ValueError(f"Unrecognized unit name: '{name}'")
 
 
+def scope() -> SystemdScope:
+    """
+    The scope units are managed in, from the ``SYSTEMD_SCOPE`` setting.
+
+    Defaults to :attr:`~django_systemd.defines.SystemdScope.SYSTEM`. The setting
+    may be a :class:`~django_systemd.defines.SystemdScope` or its string value.
+
+    :raises ValueError: if the setting is not a recognised scope.
+    """
+    from django.conf import settings
+
+    return SystemdScope(getattr(settings, "SYSTEMD_SCOPE", SystemdScope.SYSTEM))
+
+
 @cache
 def template_engine_config() -> dict[str, t.Any]:
     """
@@ -135,6 +149,7 @@ def template_engine_config() -> dict[str, t.Any]:
     engine_config["context"].setdefault(
         "DJANGO_SETTINGS_MODULE", os.environ.get("DJANGO_SETTINGS_MODULE", "")
     )
+    engine_config["context"].setdefault("scope", scope().value)
     return engine_config
 
 

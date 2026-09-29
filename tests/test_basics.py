@@ -15,10 +15,12 @@ from django_systemd.config import (
     ServiceUnit,
     project_units,
     render_engine,
+    scope,
     template_engine_config,
 )
 from django_systemd.defines import (
     SystemdRestartType,
+    SystemdScope,
     SystemdStartupType,
     SystemdUnitType,
 )
@@ -105,6 +107,13 @@ class TestSystemdRestartType:
     def test_str(self):
         assert str(SystemdRestartType.ON_FAILURE) == "on-failure"
         assert str(SystemdRestartType.ALWAYS) == "always"
+
+
+class TestSystemdScope:
+    def test_values(self):
+        assert SystemdScope("system") is SystemdScope.SYSTEM
+        assert SystemdScope("user") is SystemdScope.USER
+        assert str(SystemdScope.SYSTEM) == "system"
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +327,31 @@ class TestTemplateEngineConfig:
             template_engine_config.cache_clear()
             cfg = template_engine_config()
             assert cfg["ENGINES"] == custom_engine["ENGINES"]
+
+
+@pytest.mark.django_db
+class TestScopeSetting:
+    def test_defaults_to_system(self):
+        assert scope() is SystemdScope.SYSTEM
+
+    def test_setting_as_string(self):
+        with override_settings(SYSTEMD_SCOPE="user"):
+            assert scope() is SystemdScope.USER
+
+    def test_setting_as_member(self):
+        with override_settings(SYSTEMD_SCOPE=SystemdScope.USER):
+            assert scope() is SystemdScope.USER
+
+    def test_invalid_setting(self):
+        with override_settings(SYSTEMD_SCOPE="root"):
+            with pytest.raises(ValueError):
+                scope()
+
+    def test_scope_in_template_context(self):
+        assert template_engine_config()["context"]["scope"] == "system"
+        with override_settings(SYSTEMD_SCOPE="user"):
+            template_engine_config.cache_clear()
+            assert template_engine_config()["context"]["scope"] == "user"
 
 
 @pytest.mark.django_db

@@ -11,16 +11,24 @@ from unittest import mock
 
 import pytest
 
+from django_systemd.defines import SystemdScope
 from django_systemd.protocol import (
     CommandResult,
     SubprocessSystemdCtl,
     SystemdCtl,
+    system_unit_dir,
     user_unit_dir,
 )
 
 
 def completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> mock.Mock:
     return mock.Mock(returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def argv(*rest: str, scope: SystemdScope = SystemdScope.USER) -> list[str]:
+    """The exact systemctl argv the seam must build for ``rest`` in ``scope``."""
+    flags = ["--user"] if scope is SystemdScope.USER else []
+    return ["systemctl", *flags, "--no-ask-password", *rest]
 
 
 class TestUserUnitDir:
@@ -40,16 +48,45 @@ class TestCommandResult:
             result.returncode = 1  # type: ignore[misc]
 
 
+class TestScope:
+    def test_defaults_to_system_scope(self):
+        ctl = SubprocessSystemdCtl()
+        assert ctl.scope is SystemdScope.SYSTEM
+        assert ctl.unit_dir == system_unit_dir() == Path("/etc/systemd/system")
+
+    def test_user_scope_uses_user_unit_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        ctl = SubprocessSystemdCtl(scope=SystemdScope.USER)
+        assert ctl.unit_dir == tmp_path / "systemd" / "user"
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_system_scope_has_no_user_flag(self, run, tmp_path):
+        run.return_value = completed()
+        SubprocessSystemdCtl(unit_dir=tmp_path).daemon_reload()
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.SYSTEM)
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_user_scope_has_user_flag(self, run, tmp_path):
+        run.return_value = completed()
+        SubprocessSystemdCtl(scope=SystemdScope.USER, unit_dir=tmp_path).daemon_reload()
+        assert run.call_args[0][0] == argv("daemon-reload")
+
+
 class TestSubprocessSystemdCtl:
     def _ctl(self, tmp_path: Path) -> SubprocessSystemdCtl:
-        return SubprocessSystemdCtl(unit_dir=tmp_path / "units")
+        return SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "units"
+        )
 
     def test_satisfies_protocol(self, tmp_path):
         assert isinstance(self._ctl(tmp_path), SystemdCtl)
 
     def test_default_unit_dir(self, monkeypatch, tmp_path):
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-        assert SubprocessSystemdCtl().unit_dir == tmp_path / "systemd" / "user"
+        assert (
+            SubprocessSystemdCtl(scope=SystemdScope.USER).unit_dir
+            == tmp_path / "systemd" / "user"
+        )
 
     @mock.patch("django_systemd.protocol.shutil.which", return_value="/bin/systemctl")
     def test_available(self, _which, tmp_path):
@@ -64,7 +101,7 @@ class TestSubprocessSystemdCtl:
         run.return_value = completed()
         self._ctl(tmp_path).daemon_reload()
         run.assert_called_once()
-        assert run.call_args[0][0] == ["systemctl", "--user", "daemon-reload"]
+        assert run.call_args[0][0] == argv("daemon-reload")
         assert run.call_args[1]["check"] is False
 
     @mock.patch("django_systemd.protocol.subprocess.run")
@@ -98,13 +135,7 @@ class TestSubprocessSystemdCtl:
     def test_unit_verbs(self, run, method, verb, args, expected_units, tmp_path):
         run.return_value = completed()
         getattr(self._ctl(tmp_path), method)(*args)
-        assert run.call_args[0][0] == [
-            "systemctl",
-            "--user",
-            verb,
-            "--",
-            *expected_units,
-        ]
+        assert run.call_args[0][0] == argv(verb, "--", *expected_units)
 
     @pytest.mark.parametrize(
         "stdout,expected",
@@ -119,13 +150,7 @@ class TestSubprocessSystemdCtl:
     def test_is_active(self, run, stdout, expected, tmp_path):
         run.return_value = completed(0 if expected else 3, stdout)
         assert self._ctl(tmp_path).is_active("web.service") is expected
-        assert run.call_args[0][0] == [
-            "systemctl",
-            "--user",
-            "is-active",
-            "--",
-            "web.service",
-        ]
+        assert run.call_args[0][0] == argv("is-active", "--", "web.service")
 
     @mock.patch("django_systemd.protocol.subprocess.run")
     def test_unit_names_are_never_parsed_as_options(self, run, tmp_path):
@@ -170,15 +195,9 @@ class TestSubprocessSystemdCtl:
     def test_can_reload(self, run, stdout, expected, tmp_path):
         run.return_value = completed(0, stdout)
         assert self._ctl(tmp_path).can_reload("web.service") is expected
-        assert run.call_args[0][0] == [
-            "systemctl",
-            "--user",
-            "show",
-            "--property=CanReload",
-            "--value",
-            "--",
-            "web.service",
-        ]
+        assert run.call_args[0][0] == argv(
+            "show", "--property=CanReload", "--value", "--", "web.service"
+        )
 
     def test_install_unit_copies(self, tmp_path):
         source = tmp_path / "web.service"
