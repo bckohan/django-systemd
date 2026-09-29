@@ -34,3 +34,21 @@ Restart Types
 .. enum-table:: django_systemd.defines.SystemdRestartType
     :columns: name, value, doc
     :headers: name=Member, value=Restart=, doc=Description
+
+Scopes
+======
+
+.. autoclass:: django_systemd.defines.SystemdScope
+
+.. enum-table:: django_systemd.defines.SystemdScope
+    :columns: name, value, doc
+    :headers: name=Member, value=Value, doc=Description
+
+Install Methods
+================
+
+.. autoclass:: django_systemd.defines.InstallMethod
+
+.. enum-table:: django_systemd.defines.InstallMethod
+    :columns: name, value, doc
+    :headers: name=Member, value=Value, doc=Description

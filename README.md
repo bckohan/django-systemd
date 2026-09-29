@@ -19,8 +19,10 @@
    result, or render them at deploy time from live production settings.
 2. **Manage the project's units.** `django-admin systemd` can list, install,
    update, restart and reload every unit the project defines, without you
-   naming them. Everything runs in the user scope via `systemctl --user`; nothing
-   runs as root.
+   naming them. Units are managed in the system scope by default; privileges
+   come from root, an explicit escalation prefix, or polkit with the link
+   install method. The user scope, with nothing running as root, is still
+   available.
 
 ```bash
 django-admin systemd list

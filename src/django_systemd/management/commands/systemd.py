@@ -5,8 +5,10 @@ apps. Every subcommand works from the same manifest, the unit templates discover
 in each installed app's ``systemd/`` directory, so a deployment never has to
 hard-code unit names.
 
-Units are managed in the scope set by ``SYSTEMD_SCOPE``: the system manager by
-default, or the invoking user's manager.
+By default units are managed in the system scope: installed under
+``/etc/systemd/system`` and run as the ``User=`` they name. Pass ``--scope
+user`` or set :setting:`SYSTEMD_SCOPE` to manage them in the invoking user's
+manager instead. Privileges are never guessed; see :ref:`authorize`.
 
 .. typer:: django_systemd.management.commands.systemd.Command:typer_app
     :prog: django-admin systemd

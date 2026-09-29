@@ -99,5 +99,62 @@ dictionaries, but can be provided from :ref:`multiple sources <django-render-sta
 - ``django-admin``: The name or path of the Django
   :doc:`management script <django:ref/django-admin>`.
 - ``python``: The path to the Python :py:data:`interpreter <python:sys.executable>`.
+- ``scope``: The :class:`~django_systemd.defines.SystemdScope` units are managed in, as a
+  string.
 - ``settings``: The Django :doc:`settings module <django:ref/settings>`.
 - ``venv``: The path to the active python :py:data:`environment <python:sys.prefix>`.
+
+
+``SYSTEMD_SCOPE``
+------------------
+
+.. setting:: SYSTEMD_SCOPE
+
+Which manager owns the project's units: ``"system"`` (the default) or ``"user"``.
+See :class:`~django_systemd.defines.SystemdScope`. ``--scope`` on the command
+overrides it for one run. The value is also available to templates as ``scope``.
+
+Default: ``"system"``
+
+
+``SYSTEMD_ESCALATE``
+---------------------
+
+.. setting:: SYSTEMD_ESCALATE
+
+A command prefix for privileged calls in the system scope, either a string such
+as ``"sudo -n"`` or a list of arguments. It is applied to ``systemctl`` calls
+that change state and to installing or removing unit files, never to read-only
+queries such as ``list``, and never when already running as root. Use a
+non-interactive form (``sudo -n``, ``doas -n``, ``run0``) so a missing
+authorization fails instead of prompting. See :ref:`authorize`.
+
+Default: ``None`` (no escalation)
+
+
+``SYSTEMD_INSTALL_METHOD``
+---------------------------
+
+.. setting:: SYSTEMD_INSTALL_METHOD
+
+How ``install`` places units: ``"copy"`` (the default) copies rendered files into
+the unit directory; ``"link"`` keeps them in :setting:`SYSTEMD_LINK_DIR` and has
+``systemctl link`` put symlinks in the unit directory, which needs no file
+system privileges. See :class:`~django_systemd.defines.InstallMethod`.
+
+Default: ``"copy"``
+
+
+``SYSTEMD_LINK_DIR``
+---------------------
+
+.. setting:: SYSTEMD_LINK_DIR
+
+An absolute directory, writable by the deploying user, where rendered units are
+kept when :setting:`SYSTEMD_INSTALL_METHOD` is ``"link"``. Required for linking
+unless ``install --source`` supplies pre-rendered files, which are then linked
+in place. The directory should be outside systemd's unit search path and on a
+file system mounted at boot, since systemd reads the linked files as root during
+early boot; ``install`` creates it with mode ``0755`` if it does not exist.
+
+Default: ``None``
