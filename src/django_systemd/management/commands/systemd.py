@@ -298,9 +298,11 @@ class Command(TyperCommand):
         for _, path in rendered:
             typer.echo(str(path))
 
-    def _permission_hint(self, action: str, unit: ServiceUnit, err: OSError) -> str:
+    def _permission_hint(
+        self, action: str, preposition: str, unit: ServiceUnit, err: OSError
+    ) -> str:
         """A CommandError message for a PermissionError raised by install/uninstall."""
-        message = f"Failed to {action} {unit.filename} in {self.ctl.unit_dir}: {err}."
+        message = f"Failed to {action} {unit.filename} {preposition} {self.ctl.unit_dir}: {err}."
         if self.scope is SystemdScope.SYSTEM and not self.escalate:
             message += (
                 " The system scope needs privileges: run as root, set SYSTEMD_ESCALATE"
@@ -443,7 +445,7 @@ class Command(TyperCommand):
                         destination = self.ctl.install_unit(path)
                 except PermissionError as err:
                     raise CommandError(
-                        self._permission_hint("install", unit, err)
+                        self._permission_hint("install", "in", unit, err)
                     ) from err
                 except OSError as err:
                     raise CommandError(
@@ -480,6 +482,8 @@ class Command(TyperCommand):
         it cannot confirm it owns; it is left in place and reported.
         """
         resolved_link_dir = link_dir_option or self._setting(link_dir)
+        if resolved_link_dir is not None and not resolved_link_dir.is_absolute():
+            raise CommandError(f"--link-dir must be absolute, got {resolved_link_dir}.")
         for unit in self.units:
             linked = self.ctl.linked_source(unit.filename)
             if (
@@ -497,7 +501,7 @@ class Command(TyperCommand):
             except PermissionError as err:
                 if linked is None:
                     raise CommandError(
-                        self._permission_hint("remove", unit, err)
+                        self._permission_hint("remove", "from", unit, err)
                     ) from err
                 typer.secho(
                     f"{unit.filename} is still linked from {self.ctl.unit_dir}: {err}",
@@ -511,7 +515,10 @@ class Command(TyperCommand):
             except subprocess.CalledProcessError as err:
                 raise CommandError(describe_failure(err)) from err
             if linked is not None:
-                if resolved_link_dir is not None and linked.parent == resolved_link_dir:
+                if (
+                    resolved_link_dir is not None
+                    and linked.parent.resolve() == resolved_link_dir.resolve()
+                ):
                     try:
                         linked.unlink()
                         removed = True

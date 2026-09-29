@@ -359,6 +359,22 @@ class TestLinkInstall:
         assert not any(link_dir.iterdir())
         assert not any(fake_ctl.unit_dir.iterdir())
 
+    def test_uninstall_matches_link_dir_through_a_directory_symlink(
+        self, fake_ctl, tmp_path
+    ):
+        real = tmp_path / "real"
+        real.mkdir()
+        alias = tmp_path / "alias"
+        alias.symlink_to(real)
+        call_command("systemd", "install", "--method", "link", "--link-dir", str(alias))
+        call_command("systemd", "uninstall", "--link-dir", str(real))
+        assert not any(real.iterdir())
+        assert not any(fake_ctl.unit_dir.iterdir())
+
+    def test_uninstall_relative_link_dir_is_a_command_error(self, fake_ctl):
+        with pytest.raises(CommandError, match="absolute"):
+            call_command("systemd", "uninstall", "--link-dir", "relative/dir")
+
     def test_uninstall_without_link_dir_leaves_source_in_place(
         self, fake_ctl, tmp_path, capsys
     ):
