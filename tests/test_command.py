@@ -403,6 +403,32 @@ class TestLinkInstall:
             with pytest.raises(CommandError, match="SYSTEMD_LINK_DIR"):
                 call_command("systemd", "install")
 
+    def test_link_dir_created_with_0755(self, fake_ctl, tmp_path):
+        link_dir = tmp_path / "rendered"
+        old_umask = os.umask(0)
+        try:
+            call_command(
+                "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+            )
+        finally:
+            os.umask(old_umask)
+        assert link_dir.stat().st_mode & 0o777 == 0o755
+
+    def test_dangling_link_is_still_disabled(self, fake_ctl, tmp_path):
+        # The rendered source is deleted before uninstall runs: the symlink in
+        # unit_dir is now dangling, so is_installed is False, but linked_source
+        # still finds it and stop/disable must still run to remove the link.
+        link_dir = tmp_path / "rendered"
+        call_command(
+            "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+        )
+        for f in link_dir.iterdir():
+            f.unlink()
+        assert not fake_ctl.is_installed("web.service")
+        call_command("systemd", "uninstall")
+        disabled = {unit for verb, unit in fake_ctl.calls if verb == "disable"}
+        assert "web.service" in disabled
+
 
 @pytest.mark.django_db
 class TestPermissionErrors:
