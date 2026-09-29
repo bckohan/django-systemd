@@ -70,7 +70,7 @@ class SystemdCtl(Protocol):
     @property
     def available(self) -> bool:
         """
-        True if a systemctl binary is on PATH. This does not check that the user
+        True if a systemctl binary is on PATH. This does not check that the
         manager is reachable; callers must check it before calling any other
         systemctl-backed method, which raise FileNotFoundError when systemctl is
         absent. ``is_installed``, ``install_unit`` and ``uninstall_unit`` are

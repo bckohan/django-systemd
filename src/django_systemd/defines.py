@@ -170,6 +170,7 @@ class SystemdScope(StrEnum):
     USER = "user"
     """
     The invoking user's manager (``systemctl --user``). Units live in
-    ``~/.config/systemd/user``, run as that user, and need no privileges, but the
-    manager only runs while the user has a session or lingering is enabled.
+    ``$XDG_CONFIG_HOME/systemd/user`` (usually ``~/.config/systemd/user``), run
+    as that user, and need no privileges, but the manager only runs while the
+    user has a session or lingering is enabled.
     """

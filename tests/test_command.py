@@ -117,7 +117,8 @@ def fake_ctl(tmp_path):
     with mock.patch(
         "django_systemd.management.commands.systemd.SubprocessSystemdCtl",
         return_value=ctl,
-    ):
+    ) as constructor:
+        ctl.constructor = constructor
         yield ctl
 
 
@@ -152,6 +153,18 @@ def no_units():
 
 def test_fake_ctl_satisfies_protocol(tmp_path):
     assert isinstance(FakeCtl(tmp_path), SystemdCtl)
+
+
+@pytest.mark.django_db
+class TestScopeWiring:
+    def test_defaults_to_system_scope(self, fake_ctl):
+        call_command("systemd", "list")
+        fake_ctl.constructor.assert_called_once_with(SystemdScope.SYSTEM)
+
+    def test_scope_setting_is_honoured(self, fake_ctl):
+        with override_settings(SYSTEMD_SCOPE="user"):
+            call_command("systemd", "list")
+        fake_ctl.constructor.assert_called_once_with(SystemdScope.USER)
 
 
 @pytest.mark.django_db

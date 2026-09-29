@@ -93,11 +93,20 @@ def scope() -> SystemdScope:
     Defaults to :attr:`~django_systemd.defines.SystemdScope.SYSTEM`. The setting
     may be a :class:`~django_systemd.defines.SystemdScope` or its string value.
 
-    :raises ValueError: if the setting is not a recognised scope.
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is not a
+        recognised scope.
     """
     from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
 
-    return SystemdScope(getattr(settings, "SYSTEMD_SCOPE", SystemdScope.SYSTEM))
+    value = getattr(settings, "SYSTEMD_SCOPE", SystemdScope.SYSTEM)
+    try:
+        return SystemdScope(value)
+    except ValueError as err:
+        raise ImproperlyConfigured(
+            f"SYSTEMD_SCOPE must be one of "
+            f"{', '.join(s.value for s in SystemdScope)}, got {value!r}."
+        ) from err
 
 
 @cache
@@ -149,7 +158,15 @@ def template_engine_config() -> dict[str, t.Any]:
     engine_config["context"].setdefault(
         "DJANGO_SETTINGS_MODULE", os.environ.get("DJANGO_SETTINGS_MODULE", "")
     )
-    engine_config["context"].setdefault("scope", scope().value)
+    resolved_scope = scope().value
+    existing_scope = engine_config["context"].get("scope")
+    if existing_scope is not None and existing_scope != resolved_scope:
+        logger.warning(
+            "Ignoring scope=%r in SYSTEMD_TEMPLATE_CONTEXT; the scope is set by "
+            "SYSTEMD_SCOPE",
+            existing_scope,
+        )
+    engine_config["context"]["scope"] = resolved_scope
     return engine_config
 
 

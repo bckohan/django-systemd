@@ -25,7 +25,7 @@ def completed(returncode: int = 0, stdout: str = "", stderr: str = "") -> mock.M
     return mock.Mock(returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-def argv(*rest: str, scope: SystemdScope = SystemdScope.USER) -> list[str]:
+def argv(*rest: str, scope: SystemdScope) -> list[str]:
     """The exact systemctl argv the seam must build for ``rest`` in ``scope``."""
     flags = ["--user"] if scope is SystemdScope.USER else []
     return ["systemctl", *flags, "--no-ask-password", *rest]
@@ -69,7 +69,7 @@ class TestScope:
     def test_user_scope_has_user_flag(self, run, tmp_path):
         run.return_value = completed()
         SubprocessSystemdCtl(scope=SystemdScope.USER, unit_dir=tmp_path).daemon_reload()
-        assert run.call_args[0][0] == argv("daemon-reload")
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.USER)
 
 
 class TestSubprocessSystemdCtl:
@@ -97,11 +97,11 @@ class TestSubprocessSystemdCtl:
         assert self._ctl(tmp_path).available is False
 
     @mock.patch("django_systemd.protocol.subprocess.run")
-    def test_always_user_scope(self, run, tmp_path):
+    def test_daemon_reload_argv(self, run, tmp_path):
         run.return_value = completed()
         self._ctl(tmp_path).daemon_reload()
         run.assert_called_once()
-        assert run.call_args[0][0] == argv("daemon-reload")
+        assert run.call_args[0][0] == argv("daemon-reload", scope=SystemdScope.USER)
         assert run.call_args[1]["check"] is False
 
     @mock.patch("django_systemd.protocol.subprocess.run")
@@ -135,7 +135,9 @@ class TestSubprocessSystemdCtl:
     def test_unit_verbs(self, run, method, verb, args, expected_units, tmp_path):
         run.return_value = completed()
         getattr(self._ctl(tmp_path), method)(*args)
-        assert run.call_args[0][0] == argv(verb, "--", *expected_units)
+        assert run.call_args[0][0] == argv(
+            verb, "--", *expected_units, scope=SystemdScope.USER
+        )
 
     @pytest.mark.parametrize(
         "stdout,expected",
@@ -150,7 +152,9 @@ class TestSubprocessSystemdCtl:
     def test_is_active(self, run, stdout, expected, tmp_path):
         run.return_value = completed(0 if expected else 3, stdout)
         assert self._ctl(tmp_path).is_active("web.service") is expected
-        assert run.call_args[0][0] == argv("is-active", "--", "web.service")
+        assert run.call_args[0][0] == argv(
+            "is-active", "--", "web.service", scope=SystemdScope.USER
+        )
 
     @mock.patch("django_systemd.protocol.subprocess.run")
     def test_unit_names_are_never_parsed_as_options(self, run, tmp_path):
@@ -196,7 +200,12 @@ class TestSubprocessSystemdCtl:
         run.return_value = completed(0, stdout)
         assert self._ctl(tmp_path).can_reload("web.service") is expected
         assert run.call_args[0][0] == argv(
-            "show", "--property=CanReload", "--value", "--", "web.service"
+            "show",
+            "--property=CanReload",
+            "--value",
+            "--",
+            "web.service",
+            scope=SystemdScope.USER,
         )
 
     def test_install_unit_copies(self, tmp_path):

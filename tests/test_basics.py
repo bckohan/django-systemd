@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.template.exceptions import TemplateDoesNotExist
 from django.test import override_settings
 
@@ -344,7 +345,7 @@ class TestScopeSetting:
 
     def test_invalid_setting(self):
         with override_settings(SYSTEMD_SCOPE="root"):
-            with pytest.raises(ValueError):
+            with pytest.raises(ImproperlyConfigured):
                 scope()
 
     def test_scope_in_template_context(self):
@@ -352,6 +353,18 @@ class TestScopeSetting:
         with override_settings(SYSTEMD_SCOPE="user"):
             template_engine_config.cache_clear()
             assert template_engine_config()["context"]["scope"] == "user"
+
+    def test_scope_in_template_context_cannot_be_overridden(self, caplog):
+        with override_settings(SYSTEMD_TEMPLATE_CONTEXT={"scope": "user"}):
+            template_engine_config.cache_clear()
+            with caplog.at_level("WARNING", logger="django_systemd.config"):
+                cfg = template_engine_config()
+        assert cfg["context"]["scope"] == "system"
+        assert any(
+            "Ignoring scope=" in rec.message
+            and "SYSTEMD_TEMPLATE_CONTEXT" in rec.message
+            for rec in caplog.records
+        )
 
 
 @pytest.mark.django_db

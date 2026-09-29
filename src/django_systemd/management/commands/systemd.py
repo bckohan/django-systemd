@@ -5,8 +5,8 @@ apps. Every subcommand works from the same manifest, the unit templates discover
 in each installed app's ``systemd/`` directory, so a deployment never has to
 hard-code unit names.
 
-All units are managed in the **user** scope (``systemctl --user``). Nothing here
-runs as root.
+Units are managed in the scope set by ``SYSTEMD_SCOPE``: the system manager by
+default, or the invoking user's manager.
 
 .. typer:: django_systemd.management.commands.systemd.Command:typer_app
     :prog: django-admin systemd
@@ -29,7 +29,7 @@ from django.core.management import CommandError
 from django.template import TemplateDoesNotExist, TemplateSyntaxError
 from django_typer.management import TyperCommand, command
 
-from django_systemd.config import ServiceUnit, project_units, render_engine
+from django_systemd.config import ServiceUnit, project_units, render_engine, scope
 from django_systemd.defines import SystemdUnitType
 from django_systemd.protocol import SubprocessSystemdCtl, SystemdCtl
 from django_systemd.signals import unit_installed
@@ -77,7 +77,7 @@ class Command(TyperCommand):
 
     @cached_property
     def ctl(self) -> SystemdCtl:
-        return SubprocessSystemdCtl()
+        return SubprocessSystemdCtl(scope())
 
     @cached_property
     def units(self) -> list[ServiceUnit]:
