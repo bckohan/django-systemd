@@ -124,10 +124,11 @@ as does the sudoers rule above.
 rendered file, but only when it can confirm which link directory it owns: pass
 ``--link-dir`` (or set :setting:`SYSTEMD_LINK_DIR`) to the same directory the
 unit was installed with. A unit linked from elsewhere, for example one supplied
-with ``install --source``, is left in place with a notice naming it. Trying to
-link over a unit file that a previous ``install`` copied into place fails with
-a message telling you to run ``systemd uninstall`` first; systemd itself
-refuses to replace a regular file with a link.
+with ``install --source``, is left in place with a notice naming it.
+
+Trying to link over a unit file that a previous ``install`` copied into place
+fails with a message telling you to run ``systemd uninstall`` first; systemd
+itself refuses to replace a regular file with a link.
 
 .. _user-scope:
 

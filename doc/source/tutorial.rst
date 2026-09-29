@@ -52,6 +52,20 @@ Give that user read access to the checkout without changing who owns it:
     sudo chgrp -R mysite /srv/mysite
     sudo chmod -R g+rX /srv/mysite
 
+The site also writes to some of that checkout: uploads go to a ``media/``
+directory, and the default ``db.sqlite3`` database is a file SQLite writes to
+directly. Grant the ``mysite`` group write access to those paths, and, since
+SQLite also creates a journal file next to the database, to ``BASE_DIR``
+itself:
+
+.. code-block:: bash
+
+    sudo chgrp mysite /srv/mysite /srv/mysite/media /srv/mysite/db.sqlite3
+    sudo chmod g+w /srv/mysite /srv/mysite/media /srv/mysite/db.sqlite3
+
+A real deployment usually points ``DATABASES`` at a database server instead of
+SQLite, which does not need this.
+
 Install the packages
 ====================
 
@@ -62,7 +76,13 @@ the server that the web service will run:
 
     cd /srv/mysite
     source .venv/bin/activate
+    export DJANGO_SETTINGS_MODULE=mysite.settings
     pip install django-systemd gunicorn uvicorn-worker
+
+Every ``django-admin``/``python -m django`` command in the rest of this
+tutorial needs ``DJANGO_SETTINGS_MODULE`` set; a deploy script or routine
+that runs them non-interactively should set it too, rather than rely on an
+activated shell.
 
 Add ``django_systemd`` to ``INSTALLED_APPS``:
 
@@ -90,7 +110,7 @@ and add the matching sudoers rule (for example in
 ``-n`` makes sudo fail instead of prompting when the rule is missing, and the
 prefix is only ever applied to the ``systemctl``, ``install`` and ``rm`` calls
 that change state; reads such as ``systemd list`` still run as ``deploy``
-directly. See :ref:`authorize` for what each route needs.
+directly.
 
 Create an app for the unit templates
 ====================================
@@ -334,6 +354,13 @@ service's logs:
     systemctl list-timers
     journalctl -u mysite-dbcheck.service
     journalctl -u mysite-web.service -f
+
+Reading system logs as ``deploy`` (rather than as root) needs membership in
+the ``systemd-journal`` group, which takes a new login to pick up:
+
+.. code-block:: bash
+
+    sudo usermod -aG systemd-journal deploy
 
 Deploy a change
 ===============
