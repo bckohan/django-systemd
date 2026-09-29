@@ -113,6 +113,9 @@ dictionaries, but can be provided from :ref:`multiple sources <django-render-sta
 Which manager owns the project's units: ``"system"`` (the default) or ``"user"``.
 See :class:`~django_systemd.defines.SystemdScope`. ``--scope`` on the command
 overrides it for one run. The value is also available to templates as ``scope``.
+Passing ``--context scope=...`` is refused; use ``--scope`` instead. A ``scope``
+key in :setting:`SYSTEMD_TEMPLATE_CONTEXT` is likewise ignored, with a logged
+warning, in favor of the resolved scope.
 
 Default: ``"system"``
 
@@ -155,6 +158,7 @@ kept when :setting:`SYSTEMD_INSTALL_METHOD` is ``"link"``. Required for linking
 unless ``install --source`` supplies pre-rendered files, which are then linked
 in place. The directory should be outside systemd's unit search path and on a
 file system mounted at boot, since systemd reads the linked files as root during
-early boot; ``install`` creates it with mode ``0755`` if it does not exist.
+early boot; ``install`` creates it with mode ``0755`` before the umask is
+applied, if it does not exist.
 
 Default: ``None``

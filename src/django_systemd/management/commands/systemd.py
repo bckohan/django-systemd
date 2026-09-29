@@ -383,6 +383,11 @@ class Command(TyperCommand):
         method = method or self._setting(install_method)
         target_dir = link_dir_option or self._setting(link_dir)
 
+        if method is InstallMethod.LINK and not self.ctl.available:
+            raise CommandError(
+                "--method link needs systemctl, which is not available on this system."
+            )
+
         if method is InstallMethod.LINK and source is None:
             if target_dir is None:
                 raise CommandError(

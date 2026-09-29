@@ -93,8 +93,8 @@ symlinks in the unit directory.
 ``SYSTEMD_LINK_DIR`` must be an absolute path outside systemd's unit search
 path, and on a file system that is mounted at boot: systemd reads the linked
 file as root during early boot, so a separately mounted ``/home`` is not
-suitable. ``install`` creates it with mode ``0755`` and warns on stderr if it,
-or a rendered unit file, is world-writable.
+suitable. ``install`` creates it with mode ``0755`` before the umask is
+applied, and warns on stderr if it, or a rendered unit file, is world-writable.
 
 Save this as ``/etc/polkit-1/rules.d/50-mysite-deploy.rules``:
 
@@ -159,12 +159,16 @@ collide with another project's units in the same unit directory.
     **Developing without systemd**
 
     ``render`` and ``list`` work on any machine, with or without systemd.
-    ``install`` still copies or links unit files into the unit directory; if
-    ``systemctl`` is not found it skips the rest and prints "systemctl not found;
-    skipped daemon-reload and enable." ``uninstall`` behaves the same way,
-    printing "systemctl not found; skipped stop, disable and daemon-reload."
-    ``restart`` and ``reload`` need systemctl and fail outright with "systemctl
-    is not available on this system."
+    ``install --method copy`` (the default) still copies unit files into the
+    unit directory; if ``systemctl`` is not found it skips the rest and prints
+    "systemctl not found; skipped daemon-reload and enable." ``install
+    --method link`` needs ``systemctl link`` to place the symlink, so without
+    systemctl it refuses outright with "--method link needs systemctl, which
+    is not available on this system," before rendering anything or creating
+    the link directory. ``uninstall`` behaves like the copy method, printing
+    "systemctl not found; skipped stop, disable and daemon-reload." ``restart``
+    and ``reload`` need systemctl and fail outright with "systemctl is not
+    available on this system."
 
 See which units belong to the project
 --------------------------------------
@@ -217,7 +221,7 @@ On the host, with production settings active:
 
 Running ``install`` again replaces the installed unit files, so it doubles as the
 update step. The :data:`~django_systemd.signals.unit_installed` signal fires for
-each unit as it is copied.
+each unit as it is installed.
 
 Restart or reload after a deploy
 --------------------------------

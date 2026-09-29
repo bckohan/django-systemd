@@ -312,6 +312,15 @@ class TestLinkInstall:
                 "systemd", "install", "--method", "link", "--link-dir", "relative/dir"
             )
 
+    def test_link_requires_systemctl(self, make_ctl, tmp_path):
+        make_ctl(available=False)
+        link_dir = tmp_path / "rendered"
+        with pytest.raises(CommandError, match="systemctl"):
+            call_command(
+                "systemd", "install", "--method", "link", "--link-dir", str(link_dir)
+            )
+        assert not link_dir.exists()
+
     def test_link_from_source_dir(self, fake_ctl, tmp_path):
         source = tmp_path / "pre"
         source.mkdir()
