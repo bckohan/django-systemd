@@ -215,7 +215,7 @@ docs = [
     "sphinx-tabs>=3.4.7",
     "sphinxcontrib-django>=2.5",
     "sphinxcontrib-typer[png]>=0.10.0",
-    "sphinxcontrib-enum>=0.1.0"
+    "sphinxcontrib-enum>=0.3.0"
 ]
 colorama = ["colorama>=0.4.6"]
 profiling = ["tuna>=0.5.11"]

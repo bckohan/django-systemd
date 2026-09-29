@@ -53,34 +53,25 @@ class TestSystemdUnitType:
         assert str(SystemdUnitType.SERVICE) == "service"
         assert str(SystemdUnitType.TIMER) == "timer"
 
-    def test_description(self):
-        assert "daemon" in SystemdUnitType.SERVICE.description.lower()
-        assert "timer" in SystemdUnitType.TIMER.description.lower()
-
     def test_count(self):
         assert len(list(SystemdUnitType)) == 12
 
     def test_value_is_the_literal_string(self):
         assert SystemdUnitType.SERVICE.value == "service"
-        assert SystemdUnitType.SERVICE.literal == "service"
         assert repr(SystemdUnitType.SERVICE) == "<SystemdUnitType.SERVICE: 'service'>"
+        assert f"**/*.{SystemdUnitType.SERVICE}" == "**/*.service"
 
     def test_lookup_by_value(self):
         assert SystemdUnitType("timer") is SystemdUnitType.TIMER
         with pytest.raises(ValueError):
             SystemdUnitType("nope")
-        assert SystemdUnitType.from_literal("timer") is SystemdUnitType.TIMER
-        assert SystemdStartupType.from_literal("notify-reload") is (
-            SystemdStartupType.NOTIFY_RELOAD
-        )
-        with pytest.raises(ValueError):
-            SystemdUnitType.from_literal("nope")
+        assert SystemdStartupType("notify-reload") is SystemdStartupType.NOTIFY_RELOAD
 
     def test_members_are_hashable_and_distinct(self):
         lookup = {SystemdUnitType.SERVICE: 1, SystemdUnitType.TIMER: 2}
         assert lookup[SystemdUnitType.TIMER] == 2
         assert SystemdUnitType.SERVICE != SystemdUnitType.TIMER
-        assert SystemdUnitType.SERVICE != "service"
+        assert SystemdUnitType.SERVICE == "service"
 
 
 class TestSystemdStartupType:
@@ -99,9 +90,6 @@ class TestSystemdStartupType:
         assert str(SystemdStartupType.SIMPLE) == "simple"
         assert str(SystemdStartupType.NOTIFY_RELOAD) == "notify-reload"
 
-    def test_description(self):
-        assert SystemdStartupType.FORKING.description
-
 
 class TestSystemdRestartType:
     def test_all_values(self):
@@ -117,9 +105,6 @@ class TestSystemdRestartType:
     def test_str(self):
         assert str(SystemdRestartType.ON_FAILURE) == "on-failure"
         assert str(SystemdRestartType.ALWAYS) == "always"
-
-    def test_description(self):
-        assert SystemdRestartType.ALWAYS.description
 
 
 # ---------------------------------------------------------------------------

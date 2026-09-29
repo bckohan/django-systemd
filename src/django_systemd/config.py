@@ -79,7 +79,7 @@ class ServiceUnit:
         if mtch := SERVICE_UNIT_REGEX.match(name):
             return cls(
                 name=mtch.groupdict()["name"],
-                unit_type=SystemdUnitType.from_literal(mtch.groupdict()["type"]),
+                unit_type=SystemdUnitType(mtch.groupdict()["type"]),
                 path=path,
                 instanceable=mtch.groupdict()["name"].endswith("@"),
             )

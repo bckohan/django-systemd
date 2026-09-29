@@ -770,7 +770,7 @@ dev = [
     { name = "sphinx-autobuild", specifier = ">=2024.10.3" },
     { name = "sphinx-tabs", specifier = ">=3.4.7" },
     { name = "sphinxcontrib-django", specifier = ">=2.5" },
-    { name = "sphinxcontrib-enum", specifier = ">=0.1.0" },
+    { name = "sphinxcontrib-enum", specifier = ">=0.3.0" },
     { name = "sphinxcontrib-typer", extras = ["png"], specifier = ">=0.10.0" },
     { name = "tomlkit", specifier = ">=0.13.3" },
 ]
@@ -784,7 +784,7 @@ docs = [
     { name = "sphinx-autobuild", specifier = ">=2024.10.3" },
     { name = "sphinx-tabs", specifier = ">=3.4.7" },
     { name = "sphinxcontrib-django", specifier = ">=2.5" },
-    { name = "sphinxcontrib-enum", specifier = ">=0.1.0" },
+    { name = "sphinxcontrib-enum", specifier = ">=0.3.0" },
     { name = "sphinxcontrib-typer", extras = ["png"], specifier = ">=0.10.0" },
 ]
 lint = [
@@ -2165,15 +2165,15 @@ wheels = [
 
 [[package]]
 name = "sphinxcontrib-enum"
-version = "0.1.0"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12' or (extra == 'group-14-django-systemd-dj52' and extra == 'group-14-django-systemd-dj61')" },
     { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12' or (extra == 'group-14-django-systemd-dj52' and extra == 'group-14-django-systemd-dj61')" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e4/a5/434621fa56d6b4593bc1118cf1d8358c5e8c3c351c40fa3bb8e35d06f2e4/sphinxcontrib_enum-0.1.0.tar.gz", hash = "sha256:d096c447e30fb5f60678b58bec85db9af9e296b26703e124fd9fd122c0a4aa3e", size = 146352, upload-time = "2026-09-28T05:34:37.383Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9e/37/500a6ba033b9a650a6d25e1cbd639d003069cdcd5798e7b4562e6d03bbe1/sphinxcontrib_enum-0.3.0.tar.gz", hash = "sha256:5bf8ede2a70503c3215c966a9c954f841cd9d150c8d632ce305c18a6779d988d", size = 529229, upload-time = "2026-09-29T15:33:36.548Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/05/c56524985f8393e9006ef7a058005c61320a81a19669f88582cf2edcbce9/sphinxcontrib_enum-0.1.0-py3-none-any.whl", hash = "sha256:6e43bf8cded602ba0011f8a9115471d5c9a14fc01e5cde93935453a5720b3ed8", size = 13917, upload-time = "2026-09-28T05:34:36.026Z" },
+    { url = "https://files.pythonhosted.org/packages/c2/c3/a8213a1de38f27c53bf14f5d2bf63102d52be75893f155c90ffd2db43e6c/sphinxcontrib_enum-0.3.0-py3-none-any.whl", hash = "sha256:d4cc3260ffbadf8c26b23ade7c7c3a2a0bc0c8d4eb82f68930b8734c9e4d8a79", size = 18829, upload-time = "2026-09-29T15:33:34.971Z" },
 ]
 
 [[package]]
