@@ -432,3 +432,55 @@ class TestSubprocessSystemdCtl:
     def test_missing_systemctl_raises_file_not_found(self, run, tmp_path):
         with pytest.raises(FileNotFoundError):
             self._ctl(tmp_path).daemon_reload()
+
+
+class TestLink:
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_unit(self, run, tmp_path):
+        run.return_value = completed()
+        source = tmp_path / "units" / "a.service"
+        source.parent.mkdir()
+        source.write_text("x")
+        ctl = SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "unitdir"
+        )
+        dest = ctl.link_unit(source)
+        assert dest == tmp_path / "unitdir" / "a.service"
+        assert run.call_args[0][0] == argv(
+            "link", "--force", "--", str(source), scope=SystemdScope.USER
+        )
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_unit_makes_relative_source_absolute(self, run, tmp_path, monkeypatch):
+        run.return_value = completed()
+        monkeypatch.chdir(tmp_path)
+        Path("a.service").write_text("x")
+        SubprocessSystemdCtl(scope=SystemdScope.USER, unit_dir=tmp_path).link_unit(
+            Path("a.service")
+        )
+        assert run.call_args[0][0][-1] == str(tmp_path / "a.service")
+
+    @mock.patch("django_systemd.protocol.os.geteuid", return_value=1000)
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_link_is_privileged(self, run, _euid, tmp_path):
+        run.return_value = completed()
+        source = tmp_path / "a.service"
+        source.write_text("x")
+        SubprocessSystemdCtl(unit_dir=tmp_path, escalate=("sudo", "-n")).link_unit(
+            source
+        )
+        assert run.call_args[0][0][:2] == ["sudo", "-n"]
+
+    def test_linked_source(self, tmp_path):
+        ctl = SubprocessSystemdCtl(
+            scope=SystemdScope.USER, unit_dir=tmp_path / "unitdir"
+        )
+        ctl.unit_dir.mkdir()
+        target = tmp_path / "a.service"
+        target.write_text("x")
+        (ctl.unit_dir / "a.service").symlink_to(target)
+        (ctl.unit_dir / "b.service").write_text("y")
+        assert ctl.linked_source("a.service") == target
+        assert ctl.linked_source("b.service") is None
+        assert ctl.linked_source("missing.service") is None
+        assert ctl.is_installed("a.service") is True

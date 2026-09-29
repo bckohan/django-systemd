@@ -15,12 +15,15 @@ from django_systemd.config import (
     SERVICE_UNIT_REGEX,
     ServiceUnit,
     escalation,
+    install_method,
+    link_dir,
     project_units,
     render_engine,
     scope,
     template_engine_config,
 )
 from django_systemd.defines import (
+    InstallMethod,
     SystemdRestartType,
     SystemdScope,
     SystemdStartupType,
@@ -481,3 +484,22 @@ class TestSignals:
             unit_installed.disconnect(handler)
 
         assert received == ["web.service"]
+
+
+@pytest.mark.django_db
+class TestInstallMethodSettings:
+    def test_defaults(self):
+        assert install_method() is InstallMethod.COPY
+        assert link_dir() is None
+
+    def test_link_settings(self, tmp_path):
+        with override_settings(
+            SYSTEMD_INSTALL_METHOD="link", SYSTEMD_LINK_DIR=str(tmp_path)
+        ):
+            assert install_method() is InstallMethod.LINK
+            assert link_dir() == tmp_path
+
+    def test_invalid_setting_raises(self):
+        with override_settings(SYSTEMD_INSTALL_METHOD="symlink"):
+            with pytest.raises(ImproperlyConfigured):
+                install_method()

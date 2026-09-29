@@ -11,7 +11,7 @@ from pathlib import Path
 from render_static.context import resolve_context
 from render_static.engine import StaticTemplateEngine
 
-from .defines import SystemdScope, SystemdUnitType
+from .defines import InstallMethod, SystemdScope, SystemdUnitType
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,42 @@ def escalation() -> tuple[str, ...]:
         "SYSTEMD_ESCALATE must be a command string such as "
         f'"sudo -n" or a sequence of arguments, got {value!r}.'
     )
+
+
+def install_method() -> InstallMethod:
+    """
+    The unit install method, from the ``SYSTEMD_INSTALL_METHOD`` setting.
+
+    Defaults to :attr:`~django_systemd.defines.InstallMethod.COPY`. The setting
+    may be an :class:`~django_systemd.defines.InstallMethod` or its string value.
+
+    :raises django.core.exceptions.ImproperlyConfigured: if the setting is not a
+        recognised install method.
+    """
+    from django.conf import settings
+    from django.core.exceptions import ImproperlyConfigured
+
+    value = getattr(settings, "SYSTEMD_INSTALL_METHOD", InstallMethod.COPY)
+    try:
+        return InstallMethod(value)
+    except ValueError as err:
+        raise ImproperlyConfigured(
+            f"SYSTEMD_INSTALL_METHOD must be one of "
+            f"{', '.join(m.value for m in InstallMethod)}, got {value!r}."
+        ) from err
+
+
+def link_dir() -> Path | None:
+    """
+    The ``SYSTEMD_LINK_DIR`` setting: where rendered units are kept when the
+    install method is :attr:`~django_systemd.defines.InstallMethod.LINK`.
+
+    :return: A :class:`~pathlib.Path`, or ``None`` when unset.
+    """
+    from django.conf import settings
+
+    value = getattr(settings, "SYSTEMD_LINK_DIR", None)
+    return Path(value) if value else None
 
 
 @cache

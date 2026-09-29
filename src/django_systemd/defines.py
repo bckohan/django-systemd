@@ -174,3 +174,17 @@ class SystemdScope(StrEnum):
     as that user, and need no privileges, but the manager only runs while the
     user has a session or lingering is enabled.
     """
+
+
+class InstallMethod(StrEnum):
+    """How ``install`` puts a unit into the unit search path."""
+
+    COPY = "copy"
+    """Copy the rendered file into the unit directory. Needs write access there."""
+
+    LINK = "link"
+    """
+    Keep the rendered file in a directory the deploying user owns and have
+    ``systemctl link`` place a symlink in the unit directory. Needs only
+    systemd's own authorization (polkit), never file system privileges.
+    """

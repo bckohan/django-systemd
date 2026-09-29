@@ -125,6 +125,23 @@ class SystemdCtl(Protocol):
         """
         ...
 
+    def link_unit(self, source: Path) -> Path:
+        """
+        Link ``source`` into :attr:`unit_dir` with ``systemctl link --force``.
+
+        The file stays where it is; systemd reads it through the symlink. This
+        is the install method that works with polkit alone, because it never
+        writes to the unit directory itself. Re-linking an already linked unit
+        is fine.
+
+        :return: The path of the symlink in :attr:`unit_dir`.
+        """
+        ...
+
+    def linked_source(self, name: str) -> Path | None:
+        """The file a linked unit points at, or ``None`` if not a symlink."""
+        ...
+
 
 class SubprocessSystemdCtl:
     """
@@ -308,3 +325,14 @@ class SubprocessSystemdCtl:
         else:
             destination.unlink()
         return True
+
+    def link_unit(self, source: Path) -> Path:
+        source = source.absolute()
+        self._systemctl("link", "--force", units=[str(source)])
+        return self._unit_path(source.name)
+
+    def linked_source(self, name: str) -> Path | None:
+        path = self._unit_path(name)
+        if path.is_symlink():
+            return Path(os.readlink(path))
+        return None

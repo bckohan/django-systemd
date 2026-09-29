@@ -5,6 +5,7 @@ FakeCtl, so nothing here needs systemd installed.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -112,6 +113,21 @@ class FakeCtl:
             destination.unlink()
             return True
         return False
+
+    def link_unit(self, source: Path) -> Path:
+        self.calls.append(("link", source.name))
+        self.unit_dir.mkdir(parents=True, exist_ok=True)
+        destination = self.unit_dir / source.name
+        if destination.is_symlink() or destination.is_file():
+            destination.unlink()
+        destination.symlink_to(source.absolute())
+        return destination
+
+    def linked_source(self, name: str) -> Path | None:
+        destination = self.unit_dir / name
+        if destination.is_symlink():
+            return Path(os.readlink(destination))
+        return None
 
 
 @pytest.fixture
