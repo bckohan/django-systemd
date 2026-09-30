@@ -17,7 +17,7 @@ r"""
 
 """
 
-VERSION = (0, 2, 2)
+VERSION = (0, 2, 3)
 
 __title__ = "django-systemd"
 __version__ = ".".join(str(i) for i in VERSION)

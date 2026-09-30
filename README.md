@@ -11,7 +11,7 @@
 [![Test Status](https://github.com/bckohan/django-systemd/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/bckohan/django-systemd/actions/workflows/test.yml?query=branch:main)
 [![Lint Status](https://github.com/bckohan/django-systemd/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/bckohan/django-systemd/actions/workflows/lint.yml?query=branch:main)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bckohan/django-systemd/badge)](https://securityscorecards.dev/viewer/?uri=github.com/bckohan/django-systemd)
-[![Published on Django Packages](https://img.shields.io/badge/Published%20on-Django%20Packages-0c3c26)](https://djangopackages.org/packages/p/django-typer/)
+[![Published on Django Packages](https://img.shields.io/badge/Published%20on-Django%20Packages-0c3c26)](https://djangopackages.org/packages/p/django-systemd/)
                         
 
 [django-systemd](https://pypi.org/project/django-systemd) does two independent things for a Django deployment:
