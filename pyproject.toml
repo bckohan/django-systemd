@@ -68,7 +68,7 @@ rich = [
 "Repository" = "https://github.com/bckohan/django-systemd"
 "Issues" = "https://github.com/bckohan/django-systemd/issues"
 "Changelog" = "https://django-systemd.readthedocs.io/en/stable/changelog.html"
-"Code_of_Conduct" = "https://github.com/bckohan/membership/blob/main/CODE_OF_CONDUCT.md"
+"Code_of_Conduct" = "https://github.com/django-commons/membership/blob/main/CODE_OF_CONDUCT.md"
 
 
 [tool.mypy]
