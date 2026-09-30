@@ -1,18 +1,17 @@
-from datetime import datetime
-import sys
 import os
-from pathlib import Path
-from sphinx.ext.autodoc import between
 import shutil
+import sys
+from pathlib import Path
+
 import django
-from django.conf import settings
+from sphinx.ext.autodoc import between
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 sys.path.append(str(Path(__file__).parent.parent.parent))
-sys.path.append(str(Path(__file__).parent / 'ext'))
+sys.path.append(str(Path(__file__).parent / "ext"))
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'tests.settings')
-#settings.configure()
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "tests.settings")
+# settings.configure()
 django.setup()
 
 import django_systemd
@@ -47,13 +46,13 @@ release = django_systemd.__version__
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinxcontrib_django',
-    'sphinx.ext.autodoc',
-    'sphinx.ext.todo',
-    'sphinxcontrib.typer',
-    'sphinx_tabs.tabs',
+    "sphinxcontrib_django",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.todo",
+    "sphinxcontrib.typer",
+    "sphinx_tabs.tabs",
     "sphinx.ext.viewcode",
-    'sphinx.ext.intersphinx',
+    "sphinx.ext.intersphinx",
     "sphinx.ext.autosectionlabel",
     "sphinxcontrib_enum",
 ]
@@ -71,7 +70,7 @@ autodoc_use_legacy_class_based = True
 svg2pdf_converter = ("cairosvg",)
 
 # Add any paths that contain templates here, relative to this directory.
-templates_path = ['_templates']
+templates_path = ["_templates"]
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -84,7 +83,7 @@ exclude_patterns = []
 # a list of builtin themes.
 #
 # html_theme = 'sphinx_rtd_theme'
-html_theme = 'furo'
+html_theme = "furo"
 html_theme_options = {
     "source_repository": "https://github.com/bckohan/django-systemd/",
     "source_branch": "main",
@@ -95,17 +94,17 @@ html_title = f"{project} {release}"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
-html_css_files = ['style.css']
+html_static_path = ["_static"]
+html_css_files = ["style.css"]
 
 todo_include_todos = True
 
 latex_engine = "xelatex"
 
-suppress_warnings = ['app.add_directive']
+suppress_warnings = ["app.add_directive"]
 
 linkcheck_ignore = [
-    r'https://github.com/django/django/blob/main/django/core/management/__init__.py#L278',  # Ignore exact match
+    r"https://github.com/django/django/blob/main/django/core/management/__init__.py#L278",  # Ignore exact match
 ]
 
 linkcheck_allow_redirects = True
@@ -121,35 +120,36 @@ intersphinx_mapping = {
     "click": ("https://click.palletsprojects.com/en/stable", None),
     "rich": ("https://rich.readthedocs.io/en/stable", None),
     "django-typer": ("https://django-typer.readthedocs.io/en/stable", None),
-    "django-render-static": ("https://django-render-static.readthedocs.io/en/stable", None),
-    "python": ('https://docs.python.org/3', None)
+    "django-render-static": (
+        "https://django-render-static.readthedocs.io/en/stable",
+        None,
+    ),
+    "python": ("https://docs.python.org/3", None),
 }
 
 
-def pypi_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
+def pypi_role(name, rawtext, text, lineno, inliner, options=None, content=None):
     from docutils import nodes
 
     url = f"https://pypi.org/project/{text}/"
-    node = nodes.reference(rawtext, text, refuri=url, **options)
+    node = nodes.reference(rawtext, text, refuri=url, **(options or {}))
     return [node], []
 
 
-def rtd_role(name, rawtext, text, lineno, inliner, options={}, content=[]):
+def rtd_role(name, rawtext, text, lineno, inliner, options=None, content=None):
     from docutils import nodes
 
     url = f"https://{text}.readthedocs.io"
-    node = nodes.reference(rawtext, text, refuri=url, **options)
+    node = nodes.reference(rawtext, text, refuri=url, **(options or {}))
     return [node], []
 
 
 def setup(app):
     from docutils.parsers.rst import roles
+
     # Register a sphinx.ext.autodoc.between listener to ignore everything
     # between lines that contain the word IGNORE
-    app.connect(
-        'autodoc-process-docstring',
-        between('^.*[*]{79}.*$', exclude=True)
-    )
+    app.connect("autodoc-process-docstring", between("^.*[*]{79}.*$", exclude=True))
     # app.connect('html-page-context', add_page_class)
     roles.register_local_role("pypi", pypi_role)
     roles.register_local_role("rtd", rtd_role)

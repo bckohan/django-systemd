@@ -49,6 +49,9 @@ Django Systemd
    :target: https://securityscorecards.dev/viewer/?uri=github.com/bckohan/django-systemd
    :alt: OpenSSF Scorecard
 
+.. image:: https://img.shields.io/badge/Published%20on-Django%20Packages-0c3c26
+   :target: https://djangopackages.org/packages/p/django-systemd/
+   :alt: Published on Django Packages
 
 :pypi:`django-systemd` does two independent things for a Django deployment:
 
