@@ -8,6 +8,8 @@ v0.2.2 (2026-09-30)
 ===================
 
 * Fixed CoC link.
+* Updated description.
+* Drop rich optional dep as it is automatically included with typer now.
 
 
 v0.2.1 (2026-09-29)
