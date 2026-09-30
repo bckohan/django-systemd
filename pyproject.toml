@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "django-systemd"
 version = "0.2.2"
-description = "Let your Django apps manage your systemd unit files and services!"
+description = "Ship renderable systemd unit templates with your apps and manage project services through the django admin."
 requires-python = ">=3.11,<4.0"
 authors = [
   {name = "Brian Kohan", email = "bckohan@gmail.com"},
@@ -15,7 +15,7 @@ license-files = [ "LICENSE" ]
 readme = "README.md"
 repository = "https://github.com/bckohan/django-systemd"
 homepage = "https://django-systemd.readthedocs.io"
-keywords = ["django", "CLI", "management", "Typer", "commands", "systemd", "services", "integration"]
+keywords = ["django", "CLI", "management", "Typer", "commands", "systemd", "services", "integration", "systemctl", "devops"]
 dependencies = [
     "Django>=5.2,<6.2",
     "django-render-static>=3.5.0",
