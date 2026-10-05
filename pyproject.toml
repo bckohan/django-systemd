@@ -19,7 +19,7 @@ keywords = ["django", "CLI", "management", "Typer", "commands", "systemd", "serv
 dependencies = [
     "Django>=5.2,<6.2",
     "django-render-static>=3.5.0",
-    "django-typer>=3.5.1",
+    "django-typer>=4",
 ]
 classifiers = [
     "Environment :: Console",
