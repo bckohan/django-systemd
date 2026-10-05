@@ -75,9 +75,10 @@ class FakeCtl:
         self._maybe_fail("reload", *units)
         self.calls.append(("reload", units))
 
-    def stop(self, unit: str) -> None:
-        self._maybe_fail("stop", unit)
-        self.calls.append(("stop", unit))
+    def stop(self, *units: str) -> None:
+        self._maybe_fail("stop", *units)
+        self.calls.append(("stop", units))
+        self.active.difference_update(units)
 
     def can_reload(self, unit: str) -> bool:
         return unit in self.reloadable
@@ -997,7 +998,7 @@ class TestUninstall:
         assert not any(fake_ctl.unit_dir.iterdir())
         disabled = {unit for verb, unit in fake_ctl.calls if verb == "disable"}
         assert disabled == {"web.service", "check.timer"}
-        assert fake_ctl.calls.index(("stop", "web.service")) < fake_ctl.calls.index(
+        assert fake_ctl.calls.index(("stop", ("web.service",))) < fake_ctl.calls.index(
             ("disable", "web.service")
         )
         assert fake_ctl.calls.index(("disable", "web.service")) < fake_ctl.calls.index(
@@ -1157,6 +1158,64 @@ class TestRestart:
 
 
 @pytest.mark.django_db
+class TestStop:
+    def test_stops_installed_units_in_one_transaction(self, fake_ctl, capsys):
+        call_command("systemd", "install")
+        fake_ctl.active.update({"web.service", "check.timer"})
+        fake_ctl.calls.clear()
+        call_command("systemd", "stop")
+        assert fake_ctl.calls == [("stop", ("web.service", "check.timer"))]
+        assert not fake_ctl.active
+        assert "stopped web.service check.timer" in capsys.readouterr().out
+
+    def test_only_installed_units_by_default(self, fake_ctl):
+        call_command("systemd", "install")
+        fake_ctl.uninstall_unit("check.timer")
+        fake_ctl.calls.clear()
+        call_command("systemd", "stop")
+        assert fake_ctl.calls == [("stop", ("web.service",))]
+
+    def test_timer_triggered_service_is_stopped_by_default(self, fake_ctl):
+        with override_settings(
+            INSTALLED_APPS=["tests.apps.app3", *settings.INSTALLED_APPS],
+            SYSTEMD_TEMPLATES=["**/cleanup.*"],
+        ):
+            template_engine_config.cache_clear()
+            render_engine.cache_clear()
+            call_command("systemd", "install")
+            fake_ctl.calls.clear()
+            call_command("systemd", "stop")
+        assert fake_ctl.calls == [("stop", ("cleanup.service", "cleanup.timer"))]
+
+    def test_explicit_subset(self, fake_ctl):
+        call_command("systemd", "stop", "check.timer", "web.service")
+        assert fake_ctl.calls == [("stop", ("web.service", "check.timer"))]
+
+    def test_unknown_unit(self, fake_ctl):
+        with pytest.raises(CommandError, match="nope.service"):
+            call_command("systemd", "stop", "nope.service")
+        assert fake_ctl.calls == []
+
+    def test_template_unit_is_not_a_target(self, fake_ctl):
+        with pytest.raises(CommandError, match="cannot be stopped directly"):
+            call_command("systemd", "stop", "app@.target")
+
+    def test_nothing_installed_is_a_noop(self, fake_ctl, capsys):
+        call_command("systemd", "stop")
+        assert fake_ctl.calls == []
+        assert "No installed project units to stop" in capsys.readouterr().err
+
+    def test_failure_is_a_command_error(self, fake_ctl):
+        fake_ctl.fail = {"stop": "Failed to stop web.service"}
+        with pytest.raises(CommandError, match="Failed to stop web.service"):
+            call_command("systemd", "stop", "web.service")
+
+    def test_requires_systemctl(self, make_ctl):
+        make_ctl(available=False)
+        with pytest.raises(CommandError, match="systemctl"):
+            call_command("systemd", "stop")
+
+
 class TestReload:
     def test_reloads_when_supported_else_restarts(self, fake_ctl, capsys):
         fake_ctl.reloadable.add("web.service")

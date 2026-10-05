@@ -249,6 +249,22 @@ Two systemd behaviours to know about:
 - None of this depends on scope: ``restart`` and ``reload`` behave the same way
   whether the units are managed in the system or the user scope.
 
+Stop units
+----------
+
+``stop`` stops every installed project unit in a single ``systemctl``
+transaction, or the unit file names you pass. Unlike ``restart``, the default
+includes services triggered by a timer or path unit, so a job that is running
+now stops too. Stopping a service on its own leaves its socket, timer or path
+unit able to start it again, so stop them together to keep it down.
+
+.. code-block:: bash
+
+    django-admin systemd stop
+
+``stop`` does not disable anything: the units start again at boot, or with
+``restart``. ``uninstall`` stops, disables and removes them.
+
 Restart units from a deployment routine
 ---------------------------------------
 

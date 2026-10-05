@@ -4,6 +4,10 @@
 Change Log
 ==========
 
+v0.5.0 (2026-10-05)
+===================
+
+
 v0.4.0 (2026-10-05)
 ===================
 
@@ -16,6 +20,8 @@ v0.3.0 (2026-10-05)
 
 * Added the :setting:`SYSTEMD_RENDER_DIR` setting to change the default
   ``render`` output directory from the current directory.
+* Added the ``stop`` command, which stops every installed project unit, or the
+  named ones, in a single ``systemctl`` transaction.
 * ``list`` prints its table with Rich. Output that is not a terminal is never
   wrapped, so piped rows keep one unit per line.
 

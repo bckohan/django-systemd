@@ -17,7 +17,7 @@
 [django-systemd](https://pypi.org/project/django-systemd) does two independent things for a Django deployment:
 
 1. **Generate systemd unit files.** Apps bundle unit templates in a `systemd/` directory. Render them at package time with known settings and commit the result, or render them at deploy time from live production settings. This allows you to do things like ship services with your reusable Django app that downstream users can deploy from their own settings.
-2. **Manage the project's units.** `django-admin systemd` can list, install, update, restart and reload every unit the project defines, without you naming them. Units are managed in the system scope by default; privileges come from root, an explicit escalation prefix, or [polkit](https://github.com/polkit-org/polkit) with the link install method. The user scope, with nothing running as root, is still available.
+2. **Manage the project's units.** `django-admin systemd` can list, install, update, restart, reload and stop every unit the project defines, without you naming them. Units are managed in the system scope by default; privileges come from root, an explicit escalation prefix, or [polkit](https://github.com/polkit-org/polkit) with the link install method. The user scope, with nothing running as root, is still available.
 
 ```bash
 django-admin systemd list

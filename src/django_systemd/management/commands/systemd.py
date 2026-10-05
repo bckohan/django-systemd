@@ -188,7 +188,9 @@ class Command(TyperCommand):
         if not self.ctl.available:
             raise CommandError("systemctl is not available on this system.")
 
-    def targets(self, names: list[str]) -> list[ServiceUnit]:
+    def targets(
+        self, names: list[str], *, verb: str = "restarted", triggered: bool = False
+    ) -> list[ServiceUnit]:
         """
         Resolve unit names to project units.
 
@@ -201,6 +203,12 @@ class Command(TyperCommand):
         its timer or path (typically a oneshot job) and restarting it directly
         would run the job, not just make it ready to run. Naming the service
         explicitly still restarts it.
+
+        :param names: Unit file names to resolve; empty selects every installed
+            unit.
+        :param verb: The past-tense action, used in error messages.
+        :param triggered: Keep services triggered by a timer or path unit in the
+            default selection, for actions such as stop that never start them.
         """
         by_name = {u.filename: u for u in self.units if not u.instanceable}
         template_names = {u.filename for u in self.units if u.instanceable}
@@ -208,7 +216,7 @@ class Command(TyperCommand):
             templates = [name for name in names if name in template_names]
             if templates:
                 raise CommandError(
-                    f"Template units cannot be restarted directly: {', '.join(templates)}"
+                    f"Template units cannot be {verb} directly: {', '.join(templates)}"
                 )
             unknown = [name for name in names if name not in by_name]
             if unknown:
@@ -218,16 +226,19 @@ class Command(TyperCommand):
             selected = [
                 u for u in by_name.values() if self.ctl.is_installed(u.filename)
             ]
-            triggered = {
-                u.name
-                for u in selected
-                if u.unit_type in (SystemdUnitType.TIMER, SystemdUnitType.PATH)
-            }
-            selected = [
-                u
-                for u in selected
-                if not (u.unit_type is SystemdUnitType.SERVICE and u.name in triggered)
-            ]
+            if not triggered:
+                triggers = {
+                    u.name
+                    for u in selected
+                    if u.unit_type in (SystemdUnitType.TIMER, SystemdUnitType.PATH)
+                }
+                selected = [
+                    u
+                    for u in selected
+                    if not (
+                        u.unit_type is SystemdUnitType.SERVICE and u.name in triggers
+                    )
+                ]
         return sorted(selected, key=lambda u: u.restart_priority)
 
     def render_units(
@@ -596,6 +607,27 @@ class Command(TyperCommand):
         names = [unit.filename for unit in targets]
         self.run_ctl(self.ctl.restart, *names)
         typer.echo(f"restarted {' '.join(names)}")
+
+    @command()
+    def stop(self, units: UnitsArgument = None) -> None:
+        """
+        Stop this project's units in a single systemctl transaction.
+
+        With no names, every installed unit is stopped, including services
+        that a timer or path unit triggers, so a job that is running now stops
+        too. Stopping a service alone leaves its socket, timer or path unit
+        able to start it again; stop them together (the default) to keep it
+        down. Units stay enabled and start again at boot; run restart to start
+        them now.
+        """
+        self.require_systemctl()
+        targets = self.targets(units or [], verb="stopped", triggered=True)
+        if not targets:
+            typer.secho("No installed project units to stop.", err=True)
+            return
+        names = [unit.filename for unit in targets]
+        self.run_ctl(self.ctl.stop, *names)
+        typer.echo(f"stopped {' '.join(names)}")
 
     @command()
     def reload(self, units: UnitsArgument = None) -> None:
