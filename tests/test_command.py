@@ -296,6 +296,22 @@ class TestLinkInstall:
         assert fake_ctl.calls[-1] == ("daemon-reload", "")
         assert str(fake_ctl.unit_dir / "web.service") in capsys.readouterr().out
 
+    def test_relink_rerenders_existing_files(self, fake_ctl, tmp_path):
+        link_dir = tmp_path / "rendered"
+        install = (
+            "systemd",
+            "install",
+            "--method",
+            "link",
+            "--link-dir",
+            str(link_dir),
+        )
+        call_command(*install, "-c", "venv=/old/venv")
+        assert "/old/venv" in (link_dir / "web.service").read_text()
+        call_command(*install, "-c", "venv=/new/venv")
+        content = (fake_ctl.unit_dir / "web.service").read_text()
+        assert "/new/venv" in content and "/old/venv" not in content
+
     def test_link_from_settings(self, fake_ctl, tmp_path):
         with override_settings(
             SYSTEMD_INSTALL_METHOD="link", SYSTEMD_LINK_DIR=str(tmp_path / "r")
