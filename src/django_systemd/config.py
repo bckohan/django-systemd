@@ -203,6 +203,20 @@ def render_dir() -> Path | None:
     return Path(value) if value else None
 
 
+def source_dir() -> Path | None:
+    """
+    The ``SYSTEMD_SOURCE_DIR`` setting: the default directory ``install`` reads
+    pre-rendered unit files from instead of rendering them. A relative path is
+    resolved against the current directory.
+
+    :return: A :class:`~pathlib.Path`, or ``None`` when unset.
+    """
+    from django.conf import settings
+
+    value = getattr(settings, "SYSTEMD_SOURCE_DIR", None)
+    return Path(value) if value else None
+
+
 @cache
 def template_engine_config() -> dict[str, t.Any]:
     """

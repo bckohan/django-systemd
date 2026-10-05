@@ -45,6 +45,7 @@ from django_systemd.config import (
     project_units,
     render_dir,
     render_engine,
+    source_dir,
 )
 from django_systemd.config import scope as settings_scope
 from django_systemd.defines import InstallMethod, SystemdScope, SystemdUnitType
@@ -369,7 +370,8 @@ class Command(TyperCommand):
             Path | None,
             typer.Option(
                 "--source",
-                help="Install pre-rendered unit files from this directory instead of rendering now.",
+                help="Install pre-rendered unit files from this directory instead of "
+                "rendering now. Defaults to the SYSTEMD_SOURCE_DIR setting.",
                 exists=True,
                 file_okay=False,
             ),
@@ -394,7 +396,8 @@ class Command(TyperCommand):
         """
         Install this project's units into the unit directory.
 
-        Units are rendered first unless --source points at pre-rendered files.
+        Units are rendered first unless --source (or SYSTEMD_SOURCE_DIR) points at
+        pre-rendered files.
         Running install again replaces the installed files, so this is also how
         you update units after a deploy. With --method link, the rendered files
         are kept in --link-dir and `systemctl link --force` places a symlink in
@@ -402,10 +405,20 @@ class Command(TyperCommand):
         """
         if not self.units:
             raise CommandError("No systemd unit templates found.")
+        if source is None:
+            source = self._setting(source_dir)
+            if source is not None and not source.is_dir():
+                raise CommandError(
+                    f"SYSTEMD_SOURCE_DIR {source} does not exist or is not a directory."
+                )
         if source is not None and context:
-            raise CommandError("--context has no effect with --source.")
+            raise CommandError(
+                "--context has no effect with --source or SYSTEMD_SOURCE_DIR."
+            )
         if source is not None and link_dir_option is not None:
-            raise CommandError("--link-dir has no effect with --source.")
+            raise CommandError(
+                "--link-dir has no effect with --source or SYSTEMD_SOURCE_DIR."
+            )
 
         method = method or self._setting(install_method)
         target_dir = link_dir_option or self._setting(link_dir)

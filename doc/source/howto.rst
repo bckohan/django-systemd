@@ -203,6 +203,10 @@ Commit ``./units`` and install them on the host without rendering again:
 
     django-admin systemd install --source ./units --enable
 
+To make this the default, point :setting:`SYSTEMD_RENDER_DIR` and
+:setting:`SYSTEMD_SOURCE_DIR` at the same directory; ``render`` then writes
+there and ``install`` reads from there without either option.
+
 ``install`` is still a Django management command even with ``--source``, so
 Django settings must still load successfully on the host.
 

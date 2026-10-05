@@ -4,6 +4,13 @@
 Change Log
 ==========
 
+v0.4.0 (2026-10-05)
+===================
+
+* Added the :setting:`SYSTEMD_SOURCE_DIR` setting, a default for
+  ``install --source`` so installs use pre-rendered units without the option.
+
+
 v0.3.0 (2026-10-05)
 ===================
 

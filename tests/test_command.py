@@ -470,6 +470,57 @@ class TestLinkInstall:
                 "systemd", "install", "--method", "link", "--link-dir", str(target)
             )
 
+    def test_link_from_source_dir_setting(self, fake_ctl, tmp_path):
+        source = tmp_path / "pre"
+        source.mkdir()
+        for name in ("web.service", "check.timer", "app@.target"):
+            (source / name).write_text("pre")
+        with override_settings(SYSTEMD_SOURCE_DIR=str(source)):
+            call_command("systemd", "install", "--method", "link")
+        assert (fake_ctl.unit_dir / "web.service").resolve() == (
+            source / "web.service"
+        ).resolve()
+
+    def test_relative_source_dir_setting_is_relative_to_cwd(
+        self, fake_ctl, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pre").mkdir()
+        for name in ("web.service", "check.timer", "app@.target"):
+            (tmp_path / "pre" / name).write_text("pre")
+        with override_settings(SYSTEMD_SOURCE_DIR="pre"):
+            call_command("systemd", "install")
+        assert (fake_ctl.unit_dir / "web.service").read_text() == "pre"
+
+    def test_source_option_overrides_setting(self, fake_ctl, tmp_path):
+        source = tmp_path / "pre"
+        source.mkdir()
+        for name in ("web.service", "check.timer", "app@.target"):
+            (source / name).write_text("explicit")
+        with override_settings(SYSTEMD_SOURCE_DIR=str(tmp_path / "missing")):
+            call_command("systemd", "install", "--source", str(source))
+        assert (fake_ctl.unit_dir / "web.service").read_text() == "explicit"
+
+    def test_missing_source_dir_setting_is_a_command_error(self, fake_ctl, tmp_path):
+        with override_settings(SYSTEMD_SOURCE_DIR=str(tmp_path / "missing")):
+            with pytest.raises(CommandError, match="SYSTEMD_SOURCE_DIR"):
+                call_command("systemd", "install")
+        assert fake_ctl.calls == []
+
+    def test_link_dir_with_source_dir_setting_is_an_error(self, fake_ctl, tmp_path):
+        source = tmp_path / "pre"
+        source.mkdir()
+        with override_settings(SYSTEMD_SOURCE_DIR=str(source)):
+            with pytest.raises(CommandError, match="SYSTEMD_SOURCE_DIR"):
+                call_command("systemd", "install", "--link-dir", str(tmp_path / "r"))
+
+    def test_context_with_source_dir_setting_is_an_error(self, fake_ctl, tmp_path):
+        source = tmp_path / "pre"
+        source.mkdir()
+        with override_settings(SYSTEMD_SOURCE_DIR=str(source)):
+            with pytest.raises(CommandError, match="--context"):
+                call_command("systemd", "install", "-c", "venv=/x")
+
     def test_link_dir_with_source_is_an_error(self, fake_ctl, tmp_path):
         source = tmp_path / "pre"
         source.mkdir()

@@ -174,3 +174,18 @@ passed on the command line. A relative path is resolved against the current
 directory. An explicit ``render`` argument always takes precedence.
 
 Default: ``None`` (the current directory)
+
+
+``SYSTEMD_SOURCE_DIR``
+-----------------------
+
+.. setting:: SYSTEMD_SOURCE_DIR
+
+A directory of pre-rendered unit files, such as one written by ``render`` and
+committed to version control, that ``install`` uses instead of rendering units
+when ``--source`` is not passed. A relative path is resolved against the current
+directory. ``install --source`` takes precedence, and ``--context`` or
+``--link-dir`` are errors while either is in effect, since nothing is rendered.
+See :setting:`SYSTEMD_RENDER_DIR` for the matching ``render`` default.
+
+Default: ``None`` (render units at install time)
