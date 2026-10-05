@@ -622,7 +622,9 @@ class TestList:
         call_command("systemd", "list")
         out = capsys.readouterr().out
         assert fake_ctl.calls == []
-        row = next(line for line in out.splitlines() if line.startswith("web.service"))
+        row = next(
+            line for line in out.splitlines() if line.strip().startswith("web.service")
+        )
         assert row.split()[1:4] == ["no", "-", "-"]
 
     def test_installed_rows_show_state(self, fake_ctl, capsys):
@@ -631,7 +633,9 @@ class TestList:
         fake_ctl.active.add("web.service")
         call_command("systemd", "list")
         out = capsys.readouterr().out
-        row = next(line for line in out.splitlines() if line.startswith("web.service"))
+        row = next(
+            line for line in out.splitlines() if line.strip().startswith("web.service")
+        )
         assert row.split()[1:4] == ["yes", "no", "yes"]
 
     def test_instanceable_units_are_never_queried(self, fake_ctl, capsys):
@@ -639,7 +643,9 @@ class TestList:
         (fake_ctl.unit_dir / "app@.target").write_text("x")
         call_command("systemd", "list")
         out = capsys.readouterr().out
-        row = next(line for line in out.splitlines() if line.startswith("app@.target"))
+        row = next(
+            line for line in out.splitlines() if line.strip().startswith("app@.target")
+        )
         assert row.split()[1:4] == ["yes", "-", "-"]
         assert fake_ctl.calls == []
 
@@ -658,7 +664,7 @@ class TestList:
         row = next(
             line
             for line in capsys.readouterr().out.splitlines()
-            if line.startswith("web.service")
+            if line.strip().startswith("web.service")
         )
         assert row.split()[1:4] == ["yes", "-", "-"]
 

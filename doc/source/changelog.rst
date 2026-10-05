@@ -9,6 +9,8 @@ v0.3.0 (unreleased)
 
 * Added the :setting:`SYSTEMD_RENDER_DIR` setting to change the default
   ``render`` output directory from the current directory.
+* ``list`` prints its table with Rich. Output that is not a terminal is never
+  wrapped, so piped rows keep one unit per line.
 
 
 v0.2.3 (2026-09-30)

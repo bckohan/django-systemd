@@ -233,10 +233,11 @@ directory:
 
 .. code-block:: text
 
-    UNIT                     INSTALLED  ENABLED  ACTIVE   SOURCE
-    mysite-web.service       no         -        -        /srv/mysite/deploy/systemd/mysite-web.service
-    mysite-dbcheck.service   no         -        -        /srv/mysite/deploy/systemd/mysite-dbcheck.service
-    mysite-dbcheck.timer     no         -        -        /srv/mysite/deploy/systemd/mysite-dbcheck.timer
+     UNIT                     INSTALLED   ENABLED   ACTIVE   SOURCE
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     mysite-web.service       no          -         -        /srv/mysite/deploy/systemd/mysite-web.service
+     mysite-dbcheck.service   no          -         -        /srv/mysite/deploy/systemd/mysite-dbcheck.service
+     mysite-dbcheck.timer     no          -         -        /srv/mysite/deploy/systemd/mysite-dbcheck.timer
 
 Nothing is installed yet, so the state columns show ``-``. This command never
 escalates and works anywhere, including a development machine without
@@ -329,10 +330,11 @@ Check the result:
 
 .. code-block:: text
 
-    UNIT                     INSTALLED  ENABLED  ACTIVE   SOURCE
-    mysite-web.service       yes        yes      yes      /srv/mysite/deploy/systemd/mysite-web.service
-    mysite-dbcheck.service   yes        yes      no       /srv/mysite/deploy/systemd/mysite-dbcheck.service
-    mysite-dbcheck.timer     yes        yes      yes      /srv/mysite/deploy/systemd/mysite-dbcheck.timer
+     UNIT                     INSTALLED   ENABLED   ACTIVE   SOURCE
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     mysite-web.service       yes         yes       yes      /srv/mysite/deploy/systemd/mysite-web.service
+     mysite-dbcheck.service   yes         yes       no       /srv/mysite/deploy/systemd/mysite-dbcheck.service
+     mysite-dbcheck.timer     yes         yes       yes      /srv/mysite/deploy/systemd/mysite-dbcheck.timer
 
 The web service and the timer are active. The check service is not, which is
 correct: a oneshot service is only active for the moment it runs. Its

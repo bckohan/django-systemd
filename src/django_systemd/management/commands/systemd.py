@@ -33,6 +33,9 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.management import CommandError
 from django.template import TemplateDoesNotExist, TemplateSyntaxError
 from django_typer.management import TyperCommand, command, initialize
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 from django_systemd.config import (
     ServiceUnit,
@@ -105,6 +108,13 @@ def parse_context(pairs: list[str]) -> dict[str, str]:
             raise CommandError(f"Context overrides must be KEY=VALUE, got: {pair!r}")
         context[key] = value
     return context
+
+
+def _state(value: bool | None) -> str:
+    """Rich markup for a yes/no unit state; ``None`` means it was not queried."""
+    if value is None:
+        return "[dim]-[/dim]"
+    return "[green]yes[/green]" if value else "[dim]no[/dim]"
 
 
 class Command(TyperCommand):
@@ -257,24 +267,35 @@ class Command(TyperCommand):
         if not self.units:
             typer.echo("No systemd unit templates found.")
             return
-        width = max(len("UNIT"), *(len(u.filename) for u in self.units))
-        typer.echo(
-            f"{'UNIT':<{width}} {'INSTALLED':<10} {'ENABLED':<8} {'ACTIVE':<8} SOURCE"
-        )
+        table = Table(box=box.SIMPLE_HEAD, header_style="bold")
+        table.add_column("UNIT", no_wrap=True)
+        table.add_column("INSTALLED")
+        table.add_column("ENABLED")
+        table.add_column("ACTIVE")
+        table.add_column("SOURCE", overflow="fold")
         available = self.ctl.available
         for unit in self.units:
             installed = self.ctl.is_installed(unit.filename)
-            enabled = active = "-"
+            enabled = active = None
             if installed and available and not unit.instanceable:
                 try:
-                    enabled = "yes" if self.ctl.is_enabled(unit.filename) else "no"
-                    active = "yes" if self.ctl.is_active(unit.filename) else "no"
+                    enabled = self.ctl.is_enabled(unit.filename)
+                    active = self.ctl.is_active(unit.filename)
                 except subprocess.CalledProcessError as err:
                     raise CommandError(describe_failure(err)) from err
-            typer.echo(
-                f"{unit.filename:<{width}} {'yes' if installed else 'no':<10} "
-                f"{enabled:<8} {active:<8} {unit.path}"
+            table.add_row(
+                unit.filename,
+                _state(installed),
+                _state(enabled),
+                _state(active),
+                str(unit.path),
             )
+        console = Console()
+        if not console.is_terminal:
+            # Piped or captured output is read by tools, not people: never fold
+            # paths to a guessed width.
+            console = Console(width=max(console.width, 10_000))
+        console.print(table)
 
     def _context(self, pairs: list[str] | None) -> dict[str, str]:
         """Parse --context overrides, refusing an override of the scope."""
