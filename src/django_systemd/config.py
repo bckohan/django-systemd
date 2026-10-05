@@ -190,6 +190,19 @@ def link_dir() -> Path | None:
     return path
 
 
+def render_dir() -> Path | None:
+    """
+    The ``SYSTEMD_RENDER_DIR`` setting: the default directory ``render`` writes
+    unit files into. A relative path is resolved against the current directory.
+
+    :return: A :class:`~pathlib.Path`, or ``None`` when unset.
+    """
+    from django.conf import settings
+
+    value = getattr(settings, "SYSTEMD_RENDER_DIR", None)
+    return Path(value) if value else None
+
+
 @cache
 def template_engine_config() -> dict[str, t.Any]:
     """

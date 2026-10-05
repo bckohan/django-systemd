@@ -4,6 +4,13 @@
 Change Log
 ==========
 
+v0.3.0 (unreleased)
+===================
+
+* Added the :setting:`SYSTEMD_RENDER_DIR` setting to change the default
+  ``render`` output directory from the current directory.
+
+
 v0.2.3 (2026-09-30)
 ===================
 

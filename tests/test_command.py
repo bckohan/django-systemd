@@ -678,6 +678,25 @@ class TestRender:
         call_command("systemd", "render")
         assert (tmp_path / "web.service").is_file()
 
+    def test_default_dir_from_setting(self, fake_ctl, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with override_settings(SYSTEMD_RENDER_DIR=str(tmp_path / "units")):
+            call_command("systemd", "render")
+        assert (tmp_path / "units" / "web.service").is_file()
+        assert not (tmp_path / "web.service").exists()
+
+    def test_relative_setting_is_relative_to_cwd(self, fake_ctl, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with override_settings(SYSTEMD_RENDER_DIR="units"):
+            call_command("systemd", "render")
+        assert (tmp_path / "units" / "web.service").is_file()
+
+    def test_argument_overrides_setting(self, fake_ctl, tmp_path):
+        with override_settings(SYSTEMD_RENDER_DIR=str(tmp_path / "units")):
+            call_command("systemd", "render", str(tmp_path / "explicit"))
+        assert (tmp_path / "explicit" / "web.service").is_file()
+        assert not (tmp_path / "units").exists()
+
     def test_highest_precedence_content(self, fake_ctl, tmp_path):
         call_command("systemd", "render", str(tmp_path))
         assert "app2 override" in (tmp_path / "web.service").read_text()

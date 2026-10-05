@@ -162,3 +162,15 @@ early boot; ``install`` creates it with mode ``0755`` before the umask is
 applied, if it does not exist.
 
 Default: ``None``
+
+
+``SYSTEMD_RENDER_DIR``
+-----------------------
+
+.. setting:: SYSTEMD_RENDER_DIR
+
+The directory ``render`` writes unit files into when no output directory is
+passed on the command line. A relative path is resolved against the current
+directory. An explicit ``render`` argument always takes precedence.
+
+Default: ``None`` (the current directory)

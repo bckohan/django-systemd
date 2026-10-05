@@ -40,6 +40,7 @@ from django_systemd.config import (
     install_method,
     link_dir,
     project_units,
+    render_dir,
     render_engine,
 )
 from django_systemd.config import scope as settings_scope
@@ -288,13 +289,16 @@ class Command(TyperCommand):
         output_dir: Annotated[
             Path | None,
             typer.Argument(
-                help="Directory to render unit files into. Defaults to the current directory."
+                help="Directory to render unit files into. Defaults to the "
+                "SYSTEMD_RENDER_DIR setting, or the current directory if unset."
             ),
         ] = None,
         context: ContextOption = None,
     ) -> None:
         """Render this project's unit templates to a directory."""
-        rendered = self.render_units(output_dir or Path("."), self._context(context))
+        rendered = self.render_units(
+            output_dir or render_dir() or Path("."), self._context(context)
+        )
         for _, path in rendered:
             typer.echo(str(path))
 

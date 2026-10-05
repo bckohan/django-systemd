@@ -18,6 +18,7 @@ from django_systemd.config import (
     install_method,
     link_dir,
     project_units,
+    render_dir,
     render_engine,
     scope,
     template_engine_config,
@@ -491,6 +492,13 @@ class TestInstallMethodSettings:
     def test_defaults(self):
         assert install_method() is InstallMethod.COPY
         assert link_dir() is None
+        assert render_dir() is None
+
+    def test_render_dir_setting(self, tmp_path):
+        with override_settings(SYSTEMD_RENDER_DIR=str(tmp_path)):
+            assert render_dir() == tmp_path
+        with override_settings(SYSTEMD_RENDER_DIR=tmp_path):
+            assert render_dir() == tmp_path
 
     def test_link_settings(self, tmp_path):
         with override_settings(
