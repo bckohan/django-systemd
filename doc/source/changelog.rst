@@ -4,7 +4,7 @@
 Change Log
 ==========
 
-v0.3.0 (unreleased)
+v0.3.0 (2026-10-05)
 ===================
 
 * Added the :setting:`SYSTEMD_RENDER_DIR` setting to change the default

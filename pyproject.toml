@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "django-systemd"
-version = "0.2.3"
+version = "0.3.0"
 description = "Ship renderable systemd unit templates with your apps and manage project services through the django admin."
 requires-python = ">=3.11,<4.0"
 authors = [
