@@ -4,6 +4,17 @@
 Change Log
 ==========
 
+v0.6.0 (unreleased)
+===================
+
+* :typer:`list <django-admin-systemd-list>` has a ``HEALTH`` column that shows
+  ``● failed`` for units systemd reports failed and ``● healthy`` otherwise.
+* :typer:`list <django-admin-systemd-list>` shows installed timers in a second
+  table with when each last fired and how the run it started ended.
+* :typer:`list <django-admin-systemd-list>` no longer shows the ``SOURCE``
+  column unless ``--verbose`` is passed.
+
+
 v0.5.0 (2026-10-05)
 ===================
 

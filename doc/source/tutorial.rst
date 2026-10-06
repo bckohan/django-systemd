@@ -229,18 +229,19 @@ directory:
 
 .. code-block:: bash
 
-    python -m django systemd list
+    python -m django systemd list --verbose
 
 .. code-block:: text
 
-     UNIT                     INSTALLED   ENABLED   ACTIVE   SOURCE
-    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-     mysite-web.service       no          -         -        /srv/mysite/deploy/systemd/mysite-web.service
-     mysite-dbcheck.service   no          -         -        /srv/mysite/deploy/systemd/mysite-dbcheck.service
-     mysite-dbcheck.timer     no          -         -        /srv/mysite/deploy/systemd/mysite-dbcheck.timer
+     UNIT                     INSTALLED   ENABLED   ACTIVE   HEALTH   SOURCE
+    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+     mysite-web.service       no          -         -        -        /srv/mysite/deploy/systemd/mysite-web.service
+     mysite-dbcheck.service   no          -         -        -        /srv/mysite/deploy/systemd/mysite-dbcheck.service
+     mysite-dbcheck.timer     no          -         -        -        /srv/mysite/deploy/systemd/mysite-dbcheck.timer
 
-Nothing is installed yet, so the state columns show ``-``. This command never
-escalates and works anywhere, including a development machine without
+``--verbose`` adds the ``SOURCE`` column: the template each unit is rendered
+from. Nothing is installed yet, so the state columns show ``-``. This command
+never escalates and works anywhere, including a development machine without
 systemd, so it is a good first check that the templates are found.
 
 Render the units
@@ -330,16 +331,25 @@ Check the result:
 
 .. code-block:: text
 
-     UNIT                     INSTALLED   ENABLED   ACTIVE   SOURCE
-    ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-     mysite-web.service       yes         yes       yes      /srv/mysite/deploy/systemd/mysite-web.service
-     mysite-dbcheck.service   yes         yes       no       /srv/mysite/deploy/systemd/mysite-dbcheck.service
-     mysite-dbcheck.timer     yes         yes       yes      /srv/mysite/deploy/systemd/mysite-dbcheck.timer
+     UNIT                     INSTALLED   ENABLED   ACTIVE   HEALTH
+    ──────────────────────────────────────────────────────────────────────
+     mysite-web.service       yes         yes       yes      ● healthy
+     mysite-dbcheck.service   yes         yes       no       ● healthy
+     mysite-dbcheck.timer     yes         yes       yes      ● healthy
+
+     TIMER                  LAST RUN                      RESULT
+    ────────────────────────────────────────────────────────────────
+     mysite-dbcheck.timer   Tue 2026-10-06 09:15:00 UTC   ✓ success
 
 The web service and the timer are active. The check service is not, which is
-correct: a oneshot service is only active for the moment it runs. Its
+correct: a oneshot service is only active for the moment it runs. It is still
+healthy; ``HEALTH`` reads ``● failed`` only when systemd reports the unit
+failed, for example after the check exits with an error. Its
 ``ENABLED`` column reads ``yes`` because systemd reports units without an
 ``[Install]`` section as ``static``, meaning they are started by something else.
+Installed timers get a second table: when each last fired and how the run it
+started ended. A failed check shows its result, such as ``✗ exit-code``, and
+a timer that has not fired yet shows ``never``.
 
 The site is up on port 8000:
 

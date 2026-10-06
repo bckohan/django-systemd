@@ -16,6 +16,7 @@ from django_systemd.protocol import (
     CommandResult,
     SubprocessSystemdCtl,
     SystemdCtl,
+    TimerRun,
     system_unit_dir,
     user_unit_dir,
 )
@@ -114,6 +115,7 @@ class TestEscalation:
         [
             ("is_active", ["is-active", "--", "a.service"]),
             ("is_enabled", ["is-enabled", "--", "a.service"]),
+            ("is_failed", ["is-failed", "--", "a.service"]),
             (
                 "can_reload",
                 ["show", "--property=CanReload", "--value", "--", "a.service"],
@@ -288,6 +290,78 @@ class TestSubprocessSystemdCtl:
         assert run.call_args[0][0] == argv(
             "is-active", "--", "web.service", scope=SystemdScope.USER
         )
+
+    @pytest.mark.parametrize(
+        "stdout,expected",
+        [
+            ("failed\n", True),
+            ("active\n", False),
+            ("inactive\n", False),
+        ],
+    )
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_is_failed(self, run, stdout, expected, tmp_path):
+        run.return_value = completed(0 if expected else 1, stdout)
+        assert self._ctl(tmp_path).is_failed("web.service") is expected
+        assert run.call_args[0][0] == argv(
+            "is-failed", "--", "web.service", scope=SystemdScope.USER
+        )
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_is_failed_unreachable_bus_raises(self, run, tmp_path):
+        run.return_value = completed(1, "", "Failed to connect to bus")
+        with pytest.raises(subprocess.CalledProcessError):
+            self._ctl(tmp_path).is_failed("web.service")
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_last_run(self, run, tmp_path):
+        run.side_effect = [
+            completed(
+                0,
+                "LastTriggerUSec=Tue 2026-10-06 03:00:00 UTC\nTriggers=check.service\n",
+            ),
+            completed(0, "Result=exit-code\n"),
+        ]
+        assert self._ctl(tmp_path).last_run("check.timer") == TimerRun(
+            last_trigger="Tue 2026-10-06 03:00:00 UTC", result="exit-code"
+        )
+        assert [c[0][0] for c in run.call_args_list] == [
+            argv(
+                "show",
+                "--property=LastTriggerUSec",
+                "--property=Triggers",
+                "--",
+                "check.timer",
+                scope=SystemdScope.USER,
+            ),
+            argv(
+                "show",
+                "--property=Result",
+                "--",
+                "check.service",
+                scope=SystemdScope.USER,
+            ),
+        ]
+
+    @pytest.mark.parametrize("last", ["", "n/a"])
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_last_run_never_fired(self, run, last, tmp_path):
+        run.return_value = completed(
+            0, f"LastTriggerUSec={last}\nTriggers=check.service\n"
+        )
+        run_ = self._ctl(tmp_path).last_run("check.timer")
+        assert run_ == TimerRun(last_trigger=None, result=None)
+        assert run.call_count == 1
+
+    @mock.patch("django_systemd.protocol.subprocess.run")
+    def test_last_run_unreachable_bus_raises(self, run, tmp_path):
+        run.return_value = completed(1, "", "Failed to connect to bus")
+        with pytest.raises(subprocess.CalledProcessError):
+            self._ctl(tmp_path).last_run("check.timer")
+
+    def test_timer_run_succeeded(self):
+        assert TimerRun(last_trigger="x", result="success").succeeded
+        assert not TimerRun(last_trigger="x", result="timeout").succeeded
 
     @mock.patch("django_systemd.protocol.subprocess.run")
     def test_unit_names_are_never_parsed_as_options(self, run, tmp_path):

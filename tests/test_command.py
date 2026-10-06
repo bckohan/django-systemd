@@ -19,7 +19,7 @@ from django.test import override_settings
 from django_systemd.config import ServiceUnit, render_engine, template_engine_config
 from django_systemd.defines import SystemdScope
 from django_systemd.management.commands.systemd import Command, parse_context
-from django_systemd.protocol import SystemdCtl
+from django_systemd.protocol import SystemdCtl, TimerRun
 from django_systemd.signals import unit_installed
 
 
@@ -42,6 +42,8 @@ class FakeCtl:
         self.reloadable = reloadable or set()
         self.calls: list[tuple[str, str]] = []
         self.active: set[str] = set()
+        self.failed: set[str] = set()
+        self.runs: dict[str, TimerRun] = {}
         self.enabled: set[str] = set()
         # verb -> stderr text; when set, that verb raises CalledProcessError instead
         # of recording a call.
@@ -102,6 +104,16 @@ class FakeCtl:
         self._maybe_fail("is-active", unit)
         self.calls.append(("is-active", unit))
         return unit in self.active
+
+    def is_failed(self, unit: str) -> bool:
+        self._maybe_fail("is-failed", unit)
+        self.calls.append(("is-failed", unit))
+        return unit in self.failed
+
+    def last_run(self, timer: str) -> TimerRun:
+        self._maybe_fail("show", timer)
+        self.calls.append(("show", timer))
+        return self.runs.get(timer, TimerRun(last_trigger=None, result=None))
 
     def is_enabled(self, unit: str) -> bool:
         self._maybe_fail("is-enabled", unit)
@@ -274,7 +286,7 @@ class TestScopeAndEscalation:
         (fake_ctl.unit_dir / "web.service").write_text("x")
         call_command("systemd", "--escalate", "sudo -n", "list")
         verbs = {verb for verb, _ in fake_ctl.calls}
-        assert verbs <= {"is-active", "is-enabled"}
+        assert verbs <= {"is-active", "is-enabled", "is-failed", "show"}
 
 
 @pytest.mark.django_db
@@ -672,19 +684,41 @@ class TestPermissionErrors:
             call_command("systemd", "install")
 
 
+def _table_lines(out: str, column: str) -> list[str]:
+    """The header and rows of the printed table that has ``column``."""
+    lines = out.splitlines()
+    at = next(i for i, line in enumerate(lines) if column in line)
+    rows = []
+    for line in lines[at + 2 :]:
+        if not line.strip():
+            break
+        rows.append(line)
+    return [lines[at], *rows]
+
+
+def _table(out: str, column: str) -> dict[str, list[str]]:
+    """Rows of the table that has ``column``, keyed by their first cell."""
+    return {line.split()[0]: line.split()[1:] for line in _table_lines(out, column)[1:]}
+
+
 @pytest.mark.django_db
 class TestList:
     def test_no_units(self, fake_ctl, no_units, capsys):
         call_command("systemd", "list")
         assert "No systemd unit templates found" in capsys.readouterr().out
 
-    def test_lists_every_project_unit_with_source(self, fake_ctl, capsys):
+    def test_lists_every_project_unit(self, fake_ctl, capsys):
         call_command("systemd", "list")
         out = capsys.readouterr().out
-        assert "UNIT" in out and "INSTALLED" in out
+        assert "UNIT" in out and "INSTALLED" in out and "HEALTH" in out
         for name in ("web.service", "check.timer", "app@.target"):
             assert name in out
-        assert "app2" in out
+        assert "SOURCE" not in out and "app2" not in out
+
+    def test_verbose_shows_source(self, fake_ctl, capsys):
+        call_command("systemd", "list", "--verbose")
+        rows = _table(capsys.readouterr().out, "SOURCE")
+        assert rows["web.service"][-1].endswith("app2/systemd/web.service")
 
     def test_not_installed_rows_do_not_query_systemctl(self, fake_ctl, capsys):
         call_command("systemd", "list")
@@ -705,6 +739,57 @@ class TestList:
             line for line in out.splitlines() if line.strip().startswith("web.service")
         )
         assert row.split()[1:4] == ["yes", "no", "yes"]
+
+    def test_installed_units_show_health(self, fake_ctl, capsys):
+        fake_ctl.unit_dir.mkdir(parents=True)
+        for name in ("web.service", "check.timer"):
+            (fake_ctl.unit_dir / name).write_text("x")
+        fake_ctl.active.add("check.timer")
+        fake_ctl.failed.add("web.service")
+        call_command("systemd", "list")
+        rows = _table(capsys.readouterr().out, "HEALTH")
+        assert rows["web.service"][3:] == ["●", "failed"]
+        assert rows["check.timer"][3:] == ["●", "healthy"]
+        assert rows["app@.target"][3:] == ["-"]
+
+    def test_timers_table_shows_last_run(self, fake_ctl, capsys):
+        fake_ctl.unit_dir.mkdir(parents=True)
+        for name in ("web.service", "check.timer"):
+            (fake_ctl.unit_dir / name).write_text("x")
+        fake_ctl.runs["check.timer"] = TimerRun(
+            last_trigger="Tue 2026-10-06 03:00:00 UTC", result="success"
+        )
+        call_command("systemd", "list")
+        out = capsys.readouterr().out
+        assert "LAST RUN" not in _table_lines(out, "HEALTH")[0]
+        timers = _table(out, "LAST RUN")
+        assert timers == {
+            "check.timer": ["Tue", "2026-10-06", "03:00:00", "UTC", "✓", "success"]
+        }
+        assert ("show", "web.service") not in fake_ctl.calls
+
+    def test_timers_table_shows_failed_run(self, fake_ctl, capsys):
+        fake_ctl.unit_dir.mkdir(parents=True)
+        (fake_ctl.unit_dir / "check.timer").write_text("x")
+        fake_ctl.runs["check.timer"] = TimerRun(
+            last_trigger="Tue 2026-10-06 03:00:00 UTC", result="exit-code"
+        )
+        call_command("systemd", "list")
+        timers = _table(capsys.readouterr().out, "LAST RUN")
+        assert timers["check.timer"][-2:] == ["✗", "exit-code"]
+
+    def test_timer_that_never_fired(self, fake_ctl, capsys):
+        fake_ctl.unit_dir.mkdir(parents=True)
+        (fake_ctl.unit_dir / "check.timer").write_text("x")
+        call_command("systemd", "list")
+        assert _table(capsys.readouterr().out, "LAST RUN") == {
+            "check.timer": ["never", "-"]
+        }
+
+    def test_no_timers_table_without_installed_timers(self, fake_ctl, capsys):
+        call_command("systemd", "list")
+        assert "LAST RUN" not in capsys.readouterr().out
+        assert fake_ctl.calls == []
 
     def test_instanceable_units_are_never_queried(self, fake_ctl, capsys):
         fake_ctl.unit_dir.mkdir(parents=True)

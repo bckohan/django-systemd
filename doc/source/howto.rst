@@ -178,10 +178,19 @@ See which units belong to the project
 
     django-admin systemd list
 
-Each row shows the unit, whether it is installed in the unit directory,
-whether it is enabled and active, and which template it comes from. State columns
-show ``-`` for units that are not installed, for template units (``name@.type``),
-and when ``systemctl`` is not available.
+Each row shows the unit, whether it is installed in the unit directory, whether
+it is enabled and active, and its health. ``HEALTH`` is ``● failed`` when
+systemd reports the unit failed (its process crashed, exited with an error or
+failed to start) and ``● healthy`` otherwise; an inactive unit is not
+unhealthy, since a service run by a timer is inactive between runs. State
+columns show ``-`` for units that are not installed, for template units
+(``name@.type``), and when ``systemctl`` is not available. ``--verbose`` adds a
+``SOURCE`` column with the template each unit is rendered from.
+
+Installed timers are listed again in a second table with when each last fired
+(``LAST RUN``, or ``never``) and how the run it started ended (``RESULT``):
+``✓ success``, or the systemd result for a failure, such as ``✗ exit-code`` or
+``✗ timeout``.
 
 Render units at package time
 ----------------------------

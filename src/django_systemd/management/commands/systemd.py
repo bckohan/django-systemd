@@ -49,7 +49,7 @@ from django_systemd.config import (
 )
 from django_systemd.config import scope as settings_scope
 from django_systemd.defines import InstallMethod, SystemdScope, SystemdUnitType
-from django_systemd.protocol import SubprocessSystemdCtl, SystemdCtl
+from django_systemd.protocol import SubprocessSystemdCtl, SystemdCtl, TimerRun
 from django_systemd.signals import unit_installed
 
 ContextOption = Annotated[
@@ -116,6 +116,22 @@ def _state(value: bool | None) -> str:
     if value is None:
         return "[dim]-[/dim]"
     return "[green]yes[/green]" if value else "[dim]no[/dim]"
+
+
+def _health(failed: bool | None) -> str:
+    """Rich markup for a unit's health; ``None`` means it was not queried."""
+    if failed is None:
+        return "[dim]-[/dim]"
+    return "[bold red]● failed[/bold red]" if failed else "[green]● healthy[/green]"
+
+
+def _run_result(run: TimerRun) -> str:
+    """Rich markup for how a timer's last run ended."""
+    if run.result is None:
+        return "[dim]-[/dim]"
+    if run.succeeded:
+        return f"[green]✓ {run.result}[/green]"
+    return f"[bold red]✗ {run.result}[/bold red]"
 
 
 class Command(TyperCommand):
@@ -274,8 +290,25 @@ class Command(TyperCommand):
         return rendered
 
     @command(name="list")
-    def list_units(self) -> None:
-        """List this project's systemd units and whether each is installed, enabled and active."""
+    def list_units(
+        self,
+        verbose: Annotated[
+            bool,
+            typer.Option(
+                "--verbose", help="Also show the template each unit is rendered from."
+            ),
+        ] = False,
+    ) -> None:
+        """
+        List this project's systemd units and whether each is installed, enabled,
+        active and healthy.
+
+        A unit is unhealthy when systemd reports it failed: its process crashed,
+        exited with an error or failed to start. An inactive unit is not
+        unhealthy, since a service its timer runs is inactive between runs.
+        Installed timers are listed again in a second table with when they last
+        fired and how that run ended.
+        """
         if not self.units:
             typer.echo("No systemd unit templates found.")
             return
@@ -284,15 +317,21 @@ class Command(TyperCommand):
         table.add_column("INSTALLED")
         table.add_column("ENABLED")
         table.add_column("ACTIVE")
-        table.add_column("SOURCE", overflow="fold")
+        table.add_column("HEALTH", no_wrap=True)
+        if verbose:
+            table.add_column("SOURCE", overflow="fold")
+        timers: list[tuple[ServiceUnit, TimerRun]] = []
         available = self.ctl.available
         for unit in self.units:
             installed = self.ctl.is_installed(unit.filename)
-            enabled = active = None
+            enabled = active = failed = None
             if installed and available and not unit.instanceable:
                 try:
                     enabled = self.ctl.is_enabled(unit.filename)
                     active = self.ctl.is_active(unit.filename)
+                    failed = self.ctl.is_failed(unit.filename)
+                    if unit.unit_type is SystemdUnitType.TIMER:
+                        timers.append((unit, self.ctl.last_run(unit.filename)))
                 except subprocess.CalledProcessError as err:
                     raise CommandError(describe_failure(err)) from err
             table.add_row(
@@ -300,7 +339,8 @@ class Command(TyperCommand):
                 _state(installed),
                 _state(enabled),
                 _state(active),
-                str(unit.path),
+                _health(failed),
+                *([str(unit.path)] if verbose else []),
             )
         console = Console()
         if not console.is_terminal:
@@ -308,6 +348,18 @@ class Command(TyperCommand):
             # paths to a guessed width.
             console = Console(width=max(console.width, 10_000))
         console.print(table)
+        if timers:
+            timer_table = Table(box=box.SIMPLE_HEAD, header_style="bold")
+            timer_table.add_column("TIMER", no_wrap=True)
+            timer_table.add_column("LAST RUN", no_wrap=True)
+            timer_table.add_column("RESULT", no_wrap=True)
+            for unit, run in timers:
+                timer_table.add_row(
+                    unit.filename,
+                    run.last_trigger or "[dim]never[/dim]",
+                    _run_result(run),
+                )
+            console.print(timer_table)
 
     def _context(self, pairs: list[str] | None) -> dict[str, str]:
         """Parse --context overrides, refusing an override of the scope."""

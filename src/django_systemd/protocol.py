@@ -59,6 +59,26 @@ class CommandResult:
     stderr: str
 
 
+@dataclass(frozen=True, slots=True)
+class TimerRun:
+    """When a timer last fired and how the run it started ended."""
+
+    last_trigger: str | None
+    """systemd's timestamp of the last trigger, or ``None`` if it never fired."""
+
+    result: str | None
+    """
+    The ``Result=`` of the triggered unit, such as ``success``, ``exit-code``,
+    ``signal`` or ``timeout``; ``None`` if the timer never fired or triggers no
+    unit.
+    """
+
+    @property
+    def succeeded(self) -> bool:
+        """True if the last run ended in ``success``."""
+        return self.result == "success"
+
+
 @runtime_checkable
 class SystemdCtl(Protocol):
     """
@@ -94,6 +114,16 @@ class SystemdCtl(Protocol):
     def disable(self, unit: str) -> None: ...
     def is_active(self, unit: str) -> bool: ...
     def is_enabled(self, unit: str) -> bool: ...
+    def is_failed(self, unit: str) -> bool:
+        """
+        True if systemd has put the unit in the ``failed`` state: its process
+        crashed, exited with an error, or failed to start.
+        """
+        ...
+
+    def last_run(self, timer: str) -> TimerRun:
+        """When ``timer`` last fired and the result of the unit it triggered."""
+        ...
 
     def is_installed(self, name: str) -> bool:
         """True if a unit file with this name exists in :attr:`unit_dir`."""
@@ -269,6 +299,31 @@ class SubprocessSystemdCtl:
     def stop(self, *units: str) -> None:
         self._systemctl("stop", units=units)
 
+    def _show(self, unit: str, *properties: str) -> dict[str, str]:
+        """Read unit properties with ``systemctl show``; empty values are omitted."""
+        result = self._query(
+            "show", *(f"--property={p}" for p in properties), units=[unit]
+        )
+        if result.returncode != 0:
+            raise subprocess.CalledProcessError(
+                result.returncode, result.argv, result.stdout, result.stderr
+            )
+        values = {}
+        for line in result.stdout.splitlines():
+            key, _, value = line.partition("=")
+            if value.strip() and value.strip() != "n/a":
+                values[key] = value.strip()
+        return values
+
+    def last_run(self, timer: str) -> TimerRun:
+        timer_props = self._show(timer, "LastTriggerUSec", "Triggers")
+        last_trigger = timer_props.get("LastTriggerUSec")
+        triggers = timer_props.get("Triggers", "").split()
+        if last_trigger is None or not triggers:
+            return TimerRun(last_trigger=last_trigger, result=None)
+        result = self._show(triggers[0], "Result").get("Result")
+        return TimerRun(last_trigger=last_trigger, result=result)
+
     def can_reload(self, unit: str) -> bool:
         result = self._query(
             "show", "--property=CanReload", "--value", units=[unit], check=False
@@ -288,6 +343,14 @@ class SubprocessSystemdCtl:
                 result.returncode, result.argv, result.stdout, result.stderr
             )
         return result.stdout.strip() in self._ACTIVE_STATES
+
+    def is_failed(self, unit: str) -> bool:
+        result = self._query("is-failed", units=[unit], check=False)
+        if result.returncode != 0 and not result.stdout:
+            raise subprocess.CalledProcessError(
+                result.returncode, result.argv, result.stdout, result.stderr
+            )
+        return result.stdout.strip() == "failed"
 
     def is_enabled(self, unit: str) -> bool:
         result = self._query("is-enabled", units=[unit], check=False)
