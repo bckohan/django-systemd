@@ -4,7 +4,14 @@
 Change Log
 ==========
 
-v0.6.0 (unreleased)
+v0.7.0 (2026-10-06)
+===================
+
+* Require django-render-static 3.8+ and django-typer 4.3+, this introduces pydantic as a transitive
+  dependency and sets the typer floor to 0.29.
+
+
+v0.6.0 (2026-10-06)
 ===================
 
 * :typer:`list <django-admin-systemd-list>` has a ``HEALTH`` column that shows

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "django-systemd"
-version = "0.6.0"
+version = "0.7.0"
 description = "Ship renderable systemd unit templates with your apps and manage project services through the django admin."
 requires-python = ">=3.11,<4.0"
 authors = [
@@ -18,9 +18,8 @@ homepage = "https://django-systemd.readthedocs.io"
 keywords = ["django", "CLI", "management", "Typer", "commands", "systemd", "services", "integration", "systemctl", "devops"]
 dependencies = [
     "Django>=5.2,<6.2",
-    "django-render-static>=3.5.0",
-    "django-typer>=4",
-    "rich>=15.0.0",
+    "django-render-static>=3.8.0",
+    "django-typer>=4.3"
 ]
 classifiers = [
     "Environment :: Console",
